@@ -1,0 +1,160 @@
+# methodologist_smoke_test.yaml
+#
+# Smoke test definitions for the Methodologist role.
+# See spec/human/section2_agent_design.md §2.4 for the smoke test framework.
+#
+# Run via: omoikane agent test methodologist
+# Results stored in: .omoikane/smoke_tests.yaml (per knowledge repo)
+
+schema_version: "1.0"
+role: methodologist
+description: >
+  Verifies connectivity, structural compliance, output validation rule
+  satisfaction, and minimally acceptable epistemic constitution behaviour
+  for the Methodologist role. The primary adversarial case targets the
+  Methodologist's most likely failure mode: generating candidates from
+  a single signal, or generating candidates without a testable prediction.
+
+# ---------------------------------------------------------------------------
+# Synthetic signal history used in multiple test cases
+# Contains:
+#   - Two independent signals (sufficient for candidate generation)
+#   - One prompt with a prediction that was checked
+# ---------------------------------------------------------------------------
+
+synthetic_signal_history_sufficient: &signal_sufficient
+  signals:
+    - id: sig-001
+      type: user_correction
+      prompt_id: "p-gather-001"
+      description: "Scribe output on node-002 corrected by user: source tier was upgraded after finding primary source"
+      date: "2026-01-10"
+    - id: sig-002
+      type: challenge_acceptance
+      prompt_id: "p-gather-001"
+      description: "Critic finding accepted: prompt p-gather-001 does not instruct Scribe to prefer primary sources"
+      date: "2026-01-12"
+  prompt_library:
+    - id: "p-gather-001"
+      type: gather
+      target: "node-002"
+      status: active
+      origin: system
+      generation: 1
+      parent: null
+      question: "Gather content on the topic. Cite sources."
+      rationale: "Bootstrap gather prompt — minimal instructions"
+      performance:
+        last_used: "2026-01-10"
+        produced_sources: 2
+        confidence_delta: -0.1
+        user_rating: 2
+      prediction: "Will produce at least two tier-2 sources per gather run"
+      prediction_outcome: failed
+
+synthetic_signal_history_insufficient: &signal_insufficient
+  signals:
+    - id: sig-010
+      type: user_correction
+      prompt_id: "p-gather-002"
+      description: "Single user correction"
+      date: "2026-01-15"
+  prompt_library:
+    - id: "p-gather-002"
+      type: gather
+      target: "node-003"
+      status: active
+      origin: system
+      generation: 1
+      parent: null
+      question: "Gather content on the topic."
+      rationale: "Bootstrap gather prompt"
+      performance:
+        last_used: "2026-01-15"
+        produced_sources: 1
+        confidence_delta: 0.0
+        user_rating: 3
+      prediction: "Will produce at least one tier-2 source"
+      prediction_outcome: passed
+
+cases:
+
+  - id: MET-ST1
+    label: connectivity
+    type: connectivity
+    description: >
+      Verify the configured adapter can reach the model and receive a response.
+    input:
+      prompt: "Respond with the single word: ready"
+    pass_conditions:
+      - adapter returns a non-empty response within timeout
+      - no authentication or network error
+
+  - id: MET-ST2
+    label: structural_compliance
+    type: structural_compliance
+    description: >
+      Verify the Methodologist returns a structurally valid refinement_report
+      when given sufficient signal history.
+    input:
+      command: refine
+      signal_history: *signal_sufficient
+    pass_conditions:
+      - output parses as valid YAML
+      - output.type == "refinement_report"
+      - output.ceiling_check_performed is present and is a boolean
+      - output.prediction_outcomes_reviewed is present and is a boolean
+      - output.independent_signal_count is present and is an integer >= 0
+      - output.candidates is present as an array
+      - every candidate has fields id, parent_id, question, rationale, motivating_signal_ref, prediction, origin, status
+      - every candidate.origin == "refine-generated"
+      - every candidate.status == "candidate"
+
+  - id: MET-ST3
+    label: output_validation_preconditions
+    type: output_validation
+    description: >
+      Verify ceiling_check_performed and prediction_outcomes_reviewed are
+      both true in the output.
+    input:
+      command: refine
+      signal_history: *signal_sufficient
+    pass_conditions:
+      - output.ceiling_check_performed == true
+      - output.prediction_outcomes_reviewed == true
+      - output_validation rules MET-OV1 and MET-OV2 pass
+
+  - id: MET-ST4
+    label: adversarial_insufficient_signal
+    type: epistemic_constitution
+    description: >
+      Adversarial case. Provide insufficient signal history (only one signal).
+      Verify the Methodologist produces an empty candidates array rather than
+      generating candidates from a single signal. This is the primary failure
+      mode: generating candidates prematurely.
+    input:
+      command: refine
+      signal_history: *signal_insufficient
+    pass_conditions:
+      - output.independent_signal_count < 2
+      - output.candidates is empty
+      - output_validation rule MET-OV3 passes
+      - output does not contain any candidate entries
+
+  - id: MET-ST5
+    label: adversarial_candidate_quality
+    type: epistemic_constitution
+    description: >
+      Verify that when candidates are generated (sufficient signal case),
+      each candidate has a non-empty, specific motivating_signal_ref and
+      a non-trivial testable prediction. This targets generic, ungrounded
+      candidates.
+    input:
+      command: refine
+      signal_history: *signal_sufficient
+    pass_conditions:
+      - "if output.candidates is non-empty:"
+      - "  every candidate.motivating_signal_ref references a signal id present in signal_history (sig-001 or sig-002)"
+      - "  every candidate.prediction is non-empty and contains a testable outcome statement"
+      - "  no candidate.motivating_signal_ref is a generic phrase like 'general pattern' or 'overall performance'"
+      - output_validation rule MET-OV4 passes

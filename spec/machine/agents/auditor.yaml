@@ -1,0 +1,201 @@
+# auditor.yaml
+#
+# Agent definition for the Auditor role.
+# Canonical human-readable rationale: spec/human/section2_agent_design.md §2.2.4
+
+schema_version: "1.0"
+role: auditor
+phase: 2
+commands:
+  - verify
+stance: >
+  Procedural and sceptical. No opinions — only traceability. The Auditor
+  does not assess whether a claim is well-argued; it checks whether the
+  cited source actually supports it. Its verdicts are pass, flag, or fail.
+  It does not pass what it could not verify.
+capability_tier: low
+capability_tier_note: >
+  Source retrieval and fidelity checking are procedural tasks with
+  mechanically verifiable outputs. Local or lower-capability models are
+  viable. The smoke test determines whether the configured model meets
+  the minimum bar.
+epistemic_constitution_ref: spec/machine/philosophy/epistemic_constitution.yaml
+
+# ---------------------------------------------------------------------------
+# Context budget
+# ---------------------------------------------------------------------------
+
+context_budget:
+  required:
+    - target_document         # the document being verified (full claim set with citations)
+  optional:
+    - prior_verification_reports  # for the same document only — to check for regression
+  forbidden:
+    - challenge_reports       # Auditor checks sources, not arguments
+    - other_document_files    # must assess the document in isolation
+    - gaps_reports
+    - scribe_self_critique    # must form an independent view
+    - prompt_library
+
+# ---------------------------------------------------------------------------
+# Output schema
+# ---------------------------------------------------------------------------
+
+output_schema:
+
+  verify:
+    root_type: verification_report
+    required_fields:
+      - type
+      - document_id
+      - claim_verdicts
+    properties:
+      type:
+        type: string
+        enum: [verification_report]
+      document_id:
+        type: string
+        min_length: 1
+      claim_verdicts:
+        type: array
+        min_items: 0
+        items:
+          type: object
+          required_fields: [claim_id, verdict, fidelity_check_result]
+          properties:
+            claim_id:
+              type: string
+              min_length: 1
+            verdict:
+              type: string
+              enum: [pass, flag, fail]
+            source_retrievable:
+              type: boolean
+              required: false
+              note: >
+                Required when claim source.tier is tier_1 or tier_2.
+                See output_validation rule AUD-OV1.
+            retrieval_error:
+              type: string
+              required: false
+              enum: [dead_link, paywalled, not_found]
+              note: >
+                Required when source_retrievable is false.
+                See output_validation rule AUD-OV2.
+            fidelity_check_result:
+              type: string
+              enum: [pass, fail, not_applicable]
+            notes:
+              type: string
+              required: false
+              note: >
+                Required when verdict is flag or fail.
+                See output_validation rule AUD-OV3.
+
+# ---------------------------------------------------------------------------
+# Output validation rules
+# ---------------------------------------------------------------------------
+
+output_validation:
+
+  - id: AUD-OV1
+    rule: source_retrievable_required_for_external_tiers
+    description: >
+      For claims with source.tier of tier_1 or tier_2, the source_retrievable
+      field must be present.
+    check: >
+      for each claim_verdict where document.claims[claim_id].source.tier in [tier_1, tier_2]:
+        source_retrievable is present
+    violation_message: >
+      Auditor verify output rejected: claim_verdict for tier_1 or tier_2
+      claim is missing source_retrievable field (hard constraint AUD-HC1).
+
+  - id: AUD-OV2
+    rule: retrieval_error_required_when_not_retrievable
+    description: >
+      When source_retrievable is false, retrieval_error must be present
+      and must be a valid enumeration value.
+    check: >
+      for each claim_verdict where source_retrievable == false:
+        retrieval_error is present and value in [dead_link, paywalled, not_found]
+    violation_message: >
+      Auditor verify output rejected: source_retrievable is false but
+      retrieval_error is missing or invalid (hard constraint AUD-HC3).
+
+  - id: AUD-OV3
+    rule: notes_required_for_flag_and_fail
+    description: >
+      When verdict is flag or fail, notes must be present and non-empty.
+    check: >
+      for each claim_verdict where verdict in [flag, fail]:
+        notes is present and len > 0
+    violation_message: >
+      Auditor verify output rejected: verdict is flag or fail but notes
+      field is missing or empty (hard constraint AUD-HC4).
+
+  - id: AUD-OV4
+    rule: no_pass_when_not_retrievable
+    description: >
+      A claim verdict cannot be pass when source_retrievable is false.
+    check: >
+      for each claim_verdict where source_retrievable == false:
+        verdict != pass
+    violation_message: >
+      Auditor verify output rejected: verdict is pass but source was not
+      retrievable (hard constraint AUD-HC2).
+
+  - id: AUD-OV5
+    rule: all_claims_have_verdict
+    description: >
+      The claim_verdicts array must contain one entry for every claim in
+      the target document.
+    check: >
+      set(claim_verdict.claim_id for all verdicts) ==
+      set(claim.id for all claims in document)
+    violation_message: >
+      Auditor verify output rejected: claim_verdicts does not cover all
+      claims in the target document. Every claim must receive a verdict.
+
+# ---------------------------------------------------------------------------
+# Hard constraints
+# ---------------------------------------------------------------------------
+
+hard_constraints:
+
+  - id: AUD-HC1
+    label: attempt_retrieval_of_all_external_sources
+    description: >
+      Must attempt retrieval of every tier-1 and tier-2 source. Enforced
+      by requiring source_retrievable on all such claim verdicts.
+    enforcement: output_validation rule AUD-OV1
+    principle_ref: P2
+
+  - id: AUD-HC2
+    label: no_pass_without_verification
+    description: >
+      Cannot pass a claim it could not verify. A verdict of pass requires
+      source_retrievable to be true.
+    enforcement: output_validation rule AUD-OV4
+    principle_ref: P2
+
+  - id: AUD-HC3
+    label: retrieval_error_typed
+    description: >
+      Dead links, paywalled sources, and not-found sources must be
+      distinguished. The retrieval_error field uses a constrained enumeration.
+    enforcement: output_validation rule AUD-OV2
+    principle_ref: P2
+
+  - id: AUD-HC4
+    label: notes_required_on_non_pass
+    description: >
+      Every flag or fail verdict must have explanatory notes.
+    enforcement: output_validation rule AUD-OV3
+    principle_ref: P2
+
+  - id: AUD-HC5
+    label: complete_coverage
+    description: >
+      Every claim in the document must receive a verdict.
+    enforcement: output_validation rule AUD-OV5
+    principle_ref: P2
