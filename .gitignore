@@ -1,0 +1,15 @@
+# Generated artifacts — never commit, always generate on demand
+spec/dist/
+
+# Omoikane working database — rebuilt from YAML via `omoikane repo reindex`
+**/.omoikane/omoikane.db
+
+# Node / Python
+node_modules/
+__pycache__/
+*.pyc
+.env
+
+# OS
+.DS_Store
+Thumbs.db
