@@ -1,0 +1,207 @@
+# gap.yaml
+#
+# Schema definition for the gap document.
+# File pattern: <knowledge-repo>/gaps/<gap-id>.yaml
+#
+# Gap documents are first-class outputs — findings in their own right,
+# not placeholders for content that will arrive later. They are produced
+# by the Scribe (during gather) and the Cartographer (during gaps runs).
+#
+# Canonical human-readable rationale: spec/human/section3_schema.md §3.5
+
+schema_version: "1.0"
+object_type: gap_document
+description: >
+  A gap document records a named, described knowledge gap. It is a finding
+  about what the repo does not and cannot currently know, not a placeholder.
+  Gap documents are stored as separate files and registered in the manifest.
+
+# ---------------------------------------------------------------------------
+# Field definitions
+# ---------------------------------------------------------------------------
+
+fields:
+  schema_version:
+    type: string
+    required: true
+    description: Schema version of this gap document file.
+
+  type:
+    type: string
+    required: true
+    enum: [gap_document]
+
+  id:
+    type: string
+    required: true
+    description: Unique gap document ID within the repo.
+
+  nature:
+    type: string
+    required: true
+    enum: [knowledge_ceiling, source_absence, contested_foundation]
+    description: >
+      knowledge_ceiling: the information does not exist or cannot be retrieved
+      regardless of approach. Do not continue prompting for this gap.
+      source_absence: information likely exists but was not found in this run.
+      Retry with different sources or search strategies.
+      contested_foundation: genuine expert disagreement on a foundational claim.
+      Document the disagreement; do not resolve it artificially.
+
+  description:
+    type: string
+    required: true
+    min_length: 1
+    description: >
+      What is known about this gap — why it exists, what was attempted,
+      what partial evidence exists at the edges.
+
+  partial_knowledge:
+    type: array
+    required: false
+    description: >
+      Claim IDs for what is known at the edges of this gap. A knowledge
+      ceiling with well-described partial knowledge is significantly more
+      useful to a researcher than a bare statement of ignorance.
+    items:
+      type: string
+      min_length: 1
+      description: Claim ID in any document in the repo.
+
+  prompt_attempts:
+    type: array
+    required: false
+    description: >
+      Prompt IDs that attempted to fill this gap and hit the ceiling.
+      Used by the Cartographer to distinguish retrieval failures from
+      knowledge ceilings when the same gap was attempted multiple times.
+    items:
+      type: string
+      min_length: 1
+      description: Prompt ID from the prompt library.
+
+  outline_node_id:
+    type: string
+    required: false
+    description: >
+      The outline node this gap belongs to, if it is scoped to one node.
+      Null for repo-wide gaps identified by the Cartographer.
+
+  status:
+    type: string
+    required: true
+    enum: [open, externally_resolved, user_closed]
+    description: >
+      open: gap is active and unresolved.
+      externally_resolved: new external information has resolved this gap.
+      user_closed: researcher has decided to close this gap out of scope.
+      Note: externally_resolved and user_closed have different implications
+      for the knowledge base's completeness claims.
+
+  created_at:
+    type: string
+    required: true
+    format: iso8601
+
+  produced_by:
+    type: string
+    required: true
+    enum: [scribe, cartographer]
+    description: >
+      Agent role that produced this gap document. When the Cartographer
+      updates a Scribe-produced gap document, it appends to prompt_attempts
+      and may upgrade the nature classification; produced_by retains the
+      original creator.
+
+  update_history:
+    type: array
+    required: false
+    description: >
+      Append-only log of updates to this gap document.
+      Changes to nature or status are logged here.
+    items:
+      type: object
+      required_fields: [entry_id, timestamp, updated_by, field_changed, old_value, new_value]
+      fields:
+        entry_id:
+          type: string
+          required: true
+        timestamp:
+          type: string
+          required: true
+          format: iso8601
+        updated_by:
+          type: string
+          required: true
+          description: Agent role or 'researcher' that made this update.
+        field_changed:
+          type: string
+          required: true
+        old_value:
+          type: string
+          required: true
+        new_value:
+          type: string
+          required: true
+
+# ---------------------------------------------------------------------------
+# Validation rules
+# ---------------------------------------------------------------------------
+
+validation_rules:
+
+  - id: GAP-VR1
+    rule: description_non_empty
+    description: The description field must be non-empty.
+    check: "len(description) > 0"
+    violation_message: >
+      Gap document rejected: description is empty. A gap document without
+      a description is not a finding — it is a placeholder.
+
+  - id: GAP-VR2
+    rule: partial_knowledge_ids_exist
+    description: >
+      All claim IDs in partial_knowledge must reference claims that exist
+      in some document in the repo.
+    check: >
+      for each claim_id in partial_knowledge:
+        claim_id exists in some document in the repo
+    on_failure: integrity_warning
+    violation_message: >
+      Gap document integrity warning: partial_knowledge references a claim
+      ID that does not exist.
+
+  - id: GAP-VR3
+    rule: prompt_attempts_ids_exist
+    description: >
+      All prompt IDs in prompt_attempts must reference entries in the
+      prompt library.
+    check: >
+      for each prompt_id in prompt_attempts:
+        prompt_id exists in prompt library
+    on_failure: integrity_warning
+    violation_message: >
+      Gap document integrity warning: prompt_attempts references a prompt
+      ID that does not exist in the prompt library.
+
+  - id: GAP-VR4
+    rule: externally_resolved_requires_checkpoint
+    description: >
+      Transitioning status from 'open' to 'externally_resolved' or
+      'user_closed' must produce a 'review' or 'inform' checkpoint
+      so the researcher is aware of the state change.
+    check: >
+      if status transitions to externally_resolved or user_closed:
+        a checkpoint entry is created in the manifest
+    violation_message: >
+      Runner error: gap status closed without producing a checkpoint.
+
+# ---------------------------------------------------------------------------
+# Invariants
+# ---------------------------------------------------------------------------
+
+invariants:
+  - Gap documents are stored as separate files, not embedded in documents.
+  - produced_by records the original creator and is not updated on subsequent edits.
+  - update_history is strictly append-only.
+  - A gap document may not be deleted — it may only transition to externally_resolved or user_closed.

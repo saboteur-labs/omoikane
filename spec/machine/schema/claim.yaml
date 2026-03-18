@@ -1,0 +1,245 @@
+# claim.yaml
+#
+# Schema definition for the claim block.
+# Claims are embedded in document blocks — they are not stored as
+# separate files. This schema is referenced by document.yaml.
+#
+# The claim block is the atomic unit of knowledge. Every factual assertion
+# in the repo lives in a claim block.
+#
+# Canonical human-readable rationale: spec/human/section3_schema.md §3.4
+# Canonical source tier, fidelity, and confidence definitions: spec/machine/philosophy/principles.yaml
+
+schema_version: "1.0"
+object_type: claim
+description: >
+  The atomic unit of knowledge. Every factual assertion in the repo is a
+  claim block embedded in a document. Claims carry full provenance: source
+  tier, fidelity, citation, and confidence with basis.
+
+# ---------------------------------------------------------------------------
+# Field definitions
+# ---------------------------------------------------------------------------
+
+fields:
+  id:
+    type: string
+    required: true
+    description: >
+      Unique claim ID within the parent document.
+      Convention: <doc-id>-C<NNN> (e.g. doc-001-C001), but any unique string
+      is valid.
+
+  type:
+    type: string
+    required: true
+    enum: [factual, contested, definitional, methodological, gap]
+    description: >
+      The epistemic type of this claim. See section3_schema.md §3.4
+      for the meaning of each type. The 'gap' type is an inline gap marker;
+      standalone gap findings use the gap document schema.
+
+  content:
+    type: string
+    required: true
+    min_length: 1
+    description: The assertion itself. A single, specific statement.
+
+  source:
+    type: object
+    required: true
+    description: >
+      Where this claim came from. All three of tier, fidelity are always
+      required. citation is required for tier_1 and tier_2 claims.
+      Canonical definitions in spec/machine/philosophy/principles.yaml P2.
+    fields:
+      tier:
+        type: string
+        required: true
+        enum: [tier_1, tier_2, tier_3]
+        description: >
+          tier_1: user-provided sources (highest trust).
+          tier_2: AI-retrieved via web search (cited, flagged).
+          tier_3: model parametric knowledge (always flagged, no external source).
+      citation:
+        type: string
+        required: false
+        min_length: 1
+        description: >
+          Full citation string. Required when tier is tier_1 or tier_2.
+          Validated by output_validation rule SCR-OV2 in scribe.yaml.
+      url:
+        type: string
+        required: false
+        description: Direct URL to the source, if available.
+      quote_basis:
+        type: string
+        required: false
+        description: >
+          The specific passage from the source the claim is drawn from.
+          Optional because not all sources are quotable (e.g. physical
+          reference copies), but should be populated whenever possible.
+          This is the Auditor's primary reference for fidelity checking.
+      fidelity:
+        type: string
+        required: true
+        enum: [direct, paraphrase, inferred]
+        description: >
+          direct: claim closely mirrors source language.
+          paraphrase: meaning preserved, words changed.
+          inferred: claim follows logically from source but is not explicitly stated.
+          Canonical definitions in spec/machine/philosophy/principles.yaml P2.
+
+  confidence:
+    type: object
+    required: true
+    description: >
+      How confident the Scribe was, and what that confidence is based on.
+      Canonical definitions in spec/machine/philosophy/principles.yaml P2.
+    fields:
+      level:
+        type: string
+        required: true
+        enum: [high, medium, low, contested]
+        description: >
+          high: strong evidence from multiple reliable sources.
+          medium: adequate evidence from at least one reliable source.
+          low: weak or limited evidence.
+          contested: genuine expert disagreement — not weak evidence, but
+          a divided field. The system surfaces this rather than resolving it.
+      basis:
+        type: string
+        required: true
+        min_length: 1
+        description: >
+          Explanation of why this confidence level was assigned.
+          'Well-known fact' is not an acceptable basis — it must describe
+          the actual evidence or lack thereof.
+      corroborating_sources:
+        type: array
+        required: false
+        description: Citations that support this claim beyond the primary source.
+        items:
+          type: string
+          min_length: 1
+      contradicting_sources:
+        type: array
+        required: false
+        description: Citations that challenge this claim.
+        items:
+          type: string
+          min_length: 1
+
+  status:
+    type: string
+    required: true
+    enum: [active, corrected, retracted, disputed]
+    description: >
+      Set by the runner — not by agents directly.
+      active: current, uncontested (Scribe sets this at creation).
+      corrected: content updated by researcher via omoikane claim correct.
+      retracted: withdrawn by researcher via omoikane claim retract.
+      disputed: an open Critic finding references this claim.
+
+  challenge_findings:
+    type: array
+    required: false
+    description: >
+      Finding IDs from Critic challenge reports that reference this claim.
+      Populated by the runner after a challenge run. Read-only from the
+      Scribe's perspective.
+    items:
+      type: string
+      min_length: 1
+
+  user_notes:
+    type: string
+    required: false
+    description: >
+      Open text field editable by the researcher via omoikane resolve.
+      No structure enforced; free-form research notes.
+
+  prediction_check:
+    type: object
+    required: false
+    description: >
+      Reference to a Methodologist prediction made about this claim, if any.
+    fields:
+      prediction_id:
+        type: string
+        required: true
+      prediction_text:
+        type: string
+        required: true
+      outcome:
+        type: string
+        required: false
+        enum: [pending, confirmed, refuted]
+
+# ---------------------------------------------------------------------------
+# Validation rules
+# ---------------------------------------------------------------------------
+
+validation_rules:
+
+  - id: CLM-VR1
+    rule: citation_required_for_external_tiers
+    description: >
+      Claims with source.tier of tier_1 or tier_2 must have a non-empty
+      source.citation field.
+    check: >
+      if source.tier in [tier_1, tier_2]:
+        source.citation is present and len > 0
+    violation_message: >
+      Claim rejected: tier_1 or tier_2 claim has no citation.
+      Enforced at Scribe output validation (SCR-OV2).
+
+  - id: CLM-VR2
+    rule: tier_3_flag
+    description: >
+      Claims with source.tier of tier_3 must not have a source.citation
+      that presents the claim as externally sourced. The url field may be
+      absent or null.
+    check: >
+      if source.tier == tier_3:
+        source.citation is absent or null
+    on_failure: integrity_warning
+    violation_message: >
+      Claim integrity warning: tier_3 claim has a citation, which is
+      contradictory. tier_3 means no external source exists.
+
+  - id: CLM-VR3
+    rule: confidence_basis_non_generic
+    description: >
+      confidence.basis must not be a generic string. This is a soft constraint
+      — it cannot be mechanically verified in all cases. Generic values like
+      'well-known fact' are caught by Scribe smoke test adversarial cases
+      rather than schema validation.
+    check: >
+      len(confidence.basis) > 0
+    violation_message: >
+      Claim rejected: confidence.basis is empty. A non-empty basis is required.
+
+  - id: CLM-VR4
+    rule: contested_type_and_confidence_alignment
+    description: >
+      A claim of type 'contested' should have confidence.level of 'contested'.
+      A mismatch (contested type with high confidence, or contested confidence
+      with factual type) is a logical inconsistency and surfaces as a review
+      checkpoint.
+    check: >
+      if type == contested: confidence.level should be contested
+      if confidence.level == contested: type should be contested or factual
+    on_failure: checkpoint_review
+    violation_message: >
+      Claim review: type and confidence.level may be inconsistent.
+      Verify the claim correctly represents the epistemic status.
+
+# ---------------------------------------------------------------------------
+# Invariants
+# ---------------------------------------------------------------------------
+
+invariants:
+  - The Scribe always creates claims with status 'active'.
+  - status transitions are performed by the runner only, never by agents.
+  - challenge_findings is populated by the runner, not by the Scribe or Critic.
