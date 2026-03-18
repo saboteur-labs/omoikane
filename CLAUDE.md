@@ -368,17 +368,32 @@ addition. Nothing ships in phase 1 without them.
 - [x] Philosophy designed (conversation)
 - [x] Model-agnostic architecture decided (conversation)
 - [x] Smoke tests confirmed as phase 1 requirement (conversation)
-- [ ] `spec/human/section1_philosophy.md` — to write
-- [ ] `spec/machine/philosophy/epistemic_constitution.yaml` — to write alongside section 1
-- [ ] `spec/machine/philosophy/principles.yaml` — to write alongside section 1
-- [ ] Sections 2–7 + all agent YAML + smoke test YAML — to write
+- [x] `spec/human/section1_philosophy.md` — complete
+- [x] `spec/machine/philosophy/epistemic_constitution.yaml` — complete
+- [x] `spec/machine/philosophy/principles.yaml` — complete
+- [x] `spec/human/section2_agent_design.md` — complete
+- [x] `spec/machine/agents/*.yaml` (6 agent + 6 smoke test) — complete
+- [x] `spec/human/section3_schema.md` — complete
+- [x] `spec/machine/schema/*.yaml` (5 files) — complete
+- [x] `spec/human/section4_prompt_library.md` — complete
+- [x] `spec/machine/prompt_library/lifecycle.yaml` — complete
+- [x] `spec/human/section5_cli_architecture.md` — complete
+- [x] `spec/machine/cli/commands.yaml` — complete
+- [x] `spec/machine/cli/checkpoints.yaml` — complete
+- [x] `spec/human/section6_persistence.md` — complete
+- [x] `spec/machine/persistence/model.yaml` — complete
+- [x] `spec/human/section7_roadmap.md` — complete
+- [x] `spec/machine/roadmap/phases.yaml` — complete
 - [ ] Implementation — phase 1
 
-**Start here:** `spec/human/section1_philosophy.md`
+**Start here:** `src/runner/adapters/claude.js` — the adapter layer is the
+natural first implementation target. The output validation layer and agent
+execution both depend on it.
 
-**Key constraints to carry into every section:**
+**Key constraints to carry into implementation:**
 
 - Hard constraints are enforced structurally by the runner, not by prompt alone
-- Every agent YAML must have a paired `<role>_smoke_test.yaml`
+- Every agent role must have a passing smoke test before being trusted with real repo data
 - Smoke tests block phase 1 shipping — they are not optional
-- Phase 1 decisions must not foreclose phases 2–4
+- Phase 1 decisions must not foreclose phases 2–4 (see `spec/machine/roadmap/phases.yaml` FC1–FC8)
+- Open questions from section 7 must be resolved before the components they affect are implemented
