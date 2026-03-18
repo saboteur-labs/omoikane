@@ -1,0 +1,318 @@
+# checkpoints.yaml
+#
+# Operational definitions for the checkpoint system.
+# Defines checkpoint types, registration rules, resolution actions,
+# and registry behaviour.
+#
+# The canonical type definitions (inform/review/block) are in
+# spec/machine/philosophy/principles.yaml P5. This file defines the
+# operational rules the runner uses to create, track, and resolve them.
+#
+# Canonical human-readable rationale: spec/human/section5_cli_architecture.md §5.2.3
+
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Checkpoint type definitions
+# ---------------------------------------------------------------------------
+# Operational elaboration of the canonical definitions in principles.yaml P5.
+
+checkpoint_types:
+
+  - id: inform
+    blocks_progress: false
+    requires_action: false
+    description: >
+      Logged and visible. No action required from the researcher. Informs
+      without demanding. Automatically resolved when the researcher runs
+      omoikane review (it appears, is seen, and is cleared from the active
+      list). Inform checkpoints are retained in checkpoint history.
+    visible_in_review: true
+    auto_resolve_on_review: true
+
+  - id: review
+    blocks_progress: false
+    requires_action: false
+    description: >
+      Surfaces for researcher attention. Non-blocking — the researcher can
+      continue running commands without acting on review checkpoints. However,
+      they remain visible in omoikane status and omoikane review until
+      explicitly resolved. Intended for findings that warrant attention but
+      do not prevent progress.
+    visible_in_review: true
+    auto_resolve_on_review: false
+    resolution_actions: [acknowledge, note, dismiss]
+
+  - id: block
+    blocks_progress: true
+    requires_action: true
+    description: >
+      The affected node or resource cannot advance until the researcher
+      explicitly acts. The state manager refuses to execute any command
+      that would advance the blocked node until the block checkpoint is
+      resolved. Blocks are created for findings that require a researcher
+      decision before the system can proceed safely.
+    visible_in_review: true
+    auto_resolve_on_review: false
+    resolution_actions: [accept, override]
+    override_consequence: >
+      Overriding a block checkpoint does not suppress the underlying reason
+      for the block — it records that the researcher has explicitly acknowledged
+      and accepted the risk. The override is logged to checkpoint history with
+      the timestamp and is visible in provenance.
+
+# ---------------------------------------------------------------------------
+# Resolution actions
+# ---------------------------------------------------------------------------
+
+resolution_actions:
+
+  - id: acknowledge
+    applicable_to: [inform, review]
+    description: >
+      Researcher has seen this checkpoint. No further action. The checkpoint
+      is moved from open_checkpoints to checkpoint history.
+
+  - id: note
+    applicable_to: [review]
+    description: >
+      Researcher acknowledges the checkpoint and attaches a note to the
+      affected object's user_notes field. The checkpoint is resolved and
+      the note is preserved.
+
+  - id: dismiss
+    applicable_to: [review]
+    description: >
+      Researcher reviews and decides no action is needed. Records the
+      dismissal in checkpoint history with timestamp. The checkpoint
+      is resolved.
+
+  - id: accept
+    applicable_to: [block]
+    description: >
+      Researcher accepts the finding that caused the block. The specific
+      consequence of acceptance depends on the checkpoint's context — see
+      checkpoint producers below. Generally, acceptance signals that the
+      researcher has reviewed and decided how to proceed.
+
+  - id: override
+    applicable_to: [block]
+    description: >
+      Researcher explicitly overrides the block. The system proceeds but
+      the override is permanently logged. Use with awareness that the
+      underlying reason for the block remains unresolved.
+    logged: true
+    produces_inform_entry: true
+
+# ---------------------------------------------------------------------------
+# Checkpoint producers
+# ---------------------------------------------------------------------------
+# Which agent outputs or runner events produce which checkpoint types,
+# and what information they carry.
+
+checkpoint_producers:
+
+  # --- Architect ---
+
+  - id: CP-ARC-1
+    producer: architect
+    trigger: outline produced with no contested or edge-case nodes and no justification
+    type: review
+    principle_ref: P1
+    description: No contested or edge-case nodes found in outline. Verify this is intentional.
+    affected_object: outline
+    resolution_actions: [acknowledge, dismiss]
+
+  # --- Scribe ---
+
+  - id: CP-SCR-1
+    producer: scribe
+    trigger: gather run complete (always)
+    type: inform
+    description: Document gathered. Review self-critique and unresolved questions.
+    affected_object: document
+    resolution_actions: [acknowledge]
+
+  - id: CP-SCR-2
+    producer: scribe
+    trigger: gather run produced one or more gap documents
+    type: review
+    principle_ref: P1
+    description: Gap(s) identified during gather. Review gap findings before continuing.
+    affected_object: gap_document
+    resolution_actions: [acknowledge, note, dismiss]
+
+  - id: CP-SCR-3
+    producer: runner
+    trigger: gather output produced by low-trust adapter
+    type: review
+    principle_ref: P2
+    description: Document produced by adapter/model that has not passed its smoke test.
+    affected_object: document
+    resolution_actions: [acknowledge, note, dismiss]
+
+  # --- Smoke tests ---
+
+  - id: CP-SMK-1
+    producer: runner
+    trigger: smoke test passed for a role
+    type: inform
+    description: Smoke test passed. Role is trusted for this adapter/model.
+    affected_object: role_config
+
+  - id: CP-SMK-2
+    producer: runner
+    trigger: smoke test failed for a role
+    type: block
+    principle_ref: P2
+    description: >
+      Smoke test failed. Role is blocked. Reconfigure the adapter/model
+      or override to proceed with low-trust outputs.
+    affected_object: role_config
+    resolution_actions: [accept, override]
+    accept_consequence: >
+      Accepting a failed smoke test block does not trust the role. It records
+      that the researcher has acknowledged the failure. The role remains blocked
+      until the smoke test passes. To use the role with low-trust, use override.
+    override_consequence: >
+      Overriding a smoke test block allows the role to run with all its outputs
+      flagged low-trust. Trust can be re-established by running omoikane agent test
+      <role> and allowing the researcher to confirm re-trust.
+
+  # --- Critic ---
+
+  - id: CP-CRT-1
+    producer: critic
+    trigger: challenge report contains one or more critical severity findings
+    type: block
+    principle_ref: P3
+    description: Critical findings require researcher action before this document can proceed.
+    affected_object: document
+    resolution_actions: [accept, override]
+
+  - id: CP-CRT-2
+    producer: critic
+    trigger: challenge report contains moderate or minor severity findings
+    type: review
+    description: Moderate or minor challenge findings identified. Review before proceeding.
+    affected_object: document
+    resolution_actions: [acknowledge, note, dismiss]
+
+  - id: CP-CRT-3
+    producer: critic
+    trigger: challenge report is clean (empty findings)
+    type: inform
+    description: No findings. Challenge passed cleanly.
+    affected_object: document
+
+  # --- Auditor ---
+
+  - id: CP-AUD-1
+    producer: auditor
+    trigger: verification report contains one or more fail verdicts
+    type: block
+    principle_ref: P2
+    description: One or more claims could not be verified. Researcher action required.
+    affected_object: document
+    resolution_actions: [accept, override]
+
+  - id: CP-AUD-2
+    producer: auditor
+    trigger: verification report contains one or more flag verdicts
+    type: review
+    description: One or more claims flagged by Auditor. Review before accepting document.
+    affected_object: document
+    resolution_actions: [acknowledge, note, dismiss]
+
+  # --- Cartographer ---
+
+  - id: CP-CAR-1
+    producer: cartographer
+    trigger: gaps report produced
+    type: inform
+    description: Gaps report written. Research queue updated.
+    affected_object: gaps_report
+
+  - id: CP-CAR-2
+    producer: cartographer
+    trigger: gaps report contains contradictions between documents
+    type: review
+    principle_ref: P1
+    description: Contradictions identified between documents. Review before proceeding.
+    affected_object: gaps_report
+    resolution_actions: [acknowledge, note, dismiss]
+
+  - id: CP-CAR-3
+    producer: cartographer
+    trigger: long lineage without confirmed predictions detected
+    type: review
+    principle_ref: P4
+    description: "Prompt lineage health warning: no confirmed predictions after 5+ generations."
+    affected_object: prompt_library
+    resolution_actions: [acknowledge, note, dismiss]
+
+  # --- Methodologist ---
+
+  - id: CP-MET-1
+    producer: methodologist
+    trigger: refinement report produced with candidates
+    type: review
+    principle_ref: P4
+    description: Prompt candidates proposed. Review and promote or reject each.
+    affected_object: prompt_candidates
+    resolution_actions: [acknowledge, note, dismiss]
+
+  - id: CP-MET-2
+    producer: methodologist
+    trigger: refinement report produced ceiling gaps
+    type: review
+    principle_ref: P1
+    description: Knowledge ceiling detected. Gap document(s) produced. No candidates generated for this topic.
+    affected_object: gap_document
+    resolution_actions: [acknowledge, note, dismiss]
+
+  # --- State manager / outline ---
+
+  - id: CP-OUT-1
+    producer: runner
+    trigger: outline node amended after approval
+    type: review
+    description: Outline amended after approval. Existing gathered document for this node may be stale.
+    affected_object: outline_node
+    resolution_actions: [acknowledge, dismiss]
+
+  # --- Prompt promotion ---
+
+  - id: CP-PRM-1
+    producer: runner
+    trigger: candidate promoted to active
+    type: inform
+    description: Prompt promoted. Previous active prompt deprecated.
+    affected_object: prompt_entry
+
+  - id: CP-PRM-2
+    producer: runner
+    trigger: candidate rejected
+    type: inform
+    description: Prompt candidate rejected and archived.
+    affected_object: prompt_entry
+
+# ---------------------------------------------------------------------------
+# Registry behaviour
+# ---------------------------------------------------------------------------
+
+registry:
+  storage: manifest.open_checkpoints array
+  history_storage: ".omoikane/checkpoint_history.yaml (append-only)"
+  on_resolve: >
+    Move from manifest.open_checkpoints to checkpoint_history.
+    Record resolution action, timestamp, and any notes.
+  uniqueness: >
+    Checkpoint IDs are unique across all checkpoints ever created,
+    not just open ones. Format recommendation: CP-<role-prefix>-<date>-<seq>.
+  ordering_in_review: >
+    omoikane review displays checkpoints in this order:
+    1. block type (most urgent)
+    2. review type (grouped by affected object)
+    3. inform type (informational, listed last)
+    Within each type, most recent first.
