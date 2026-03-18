@@ -1,0 +1,423 @@
+# phases.yaml
+#
+# Machine-readable phase definitions and forward-compatibility rules.
+# Defines phase scope, phase gates (success criteria), forward-compatibility
+# requirements, and open questions for resolution during implementation.
+#
+# Canonical human-readable rationale: spec/human/section7_roadmap.md
+
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Phase definitions
+# ---------------------------------------------------------------------------
+
+phases:
+
+  - id: phase_1
+    name: Core loop
+    label: "Phase 1 — Core loop"
+    status: spec_complete
+    description: >
+      The minimum viable research loop. A researcher can initialise, outline,
+      gather, and inspect a cited, structured knowledge base with uncertainty
+      explicitly flagged.
+
+    agents_active:
+      - architect
+      - scribe
+
+    commands_active:
+      - repo_init
+      - status
+      - outline
+      - outline_approve
+      - outline_amend
+      - gather
+      - gather_next
+      - review
+      - resolve
+      - claim_correct
+      - claim_retract
+      - agent_test
+      - spec_render
+
+    components_required:
+      - runner
+      - state_manager
+      - checkpoint_registry
+      - output_validation_layer
+      - adapter_layer
+      - smoke_test_framework
+      - signal_history_recording
+
+    non_negotiables:
+      - id: P1-NN1
+        description: Smoke tests for every agent role. Not optional. Block untrusted adapters.
+        spec_ref: spec/machine/agents/*_smoke_test.yaml
+      - id: P1-NN2
+        description: Output validation layer rejects before writing. Never accepts partial output.
+        spec_ref: spec/human/section5_cli_architecture.md §5.3
+      - id: P1-NN3
+        description: Full claim schema including source.tier, source.fidelity, confidence.level, confidence.basis.
+        spec_ref: spec/machine/schema/claim.yaml
+      - id: P1-NN4
+        description: Both Architect and Scribe with all hard constraints enforced.
+        spec_ref: "spec/machine/agents/architect.yaml, spec/machine/agents/scribe.yaml"
+
+    adapters_required:
+      - claude
+    adapters_stretch:
+      - ollama
+    adapter_note: >
+      Claude adapter is the minimum for phase 1 to ship. Ollama is a stretch
+      goal. The adapter interface must be designed so Ollama can be added in
+      phase 2 without modifying the interface — only by writing ollama.js.
+
+    phase_gate:
+      description: >
+        Phase 1 is complete when a researcher can: initialise a repo, produce
+        and approve an outline, run gather on every node, and inspect the
+        resulting knowledge base. Every claim has source tier, fidelity, and
+        confidence. Every document has a self-critique with at least one
+        unresolved question. The output validation layer rejects any document
+        that violates hard constraints. Smoke tests block untrusted adapters.
+      proves: >
+        A researcher can build a cited, structured knowledge document with
+        uncertainty explicitly flagged — without any claims being silently
+        un-sourced, without gaps being papered over, and without trusting
+        that the model followed instructions.
+
+  - id: phase_2
+    name: Validation layer
+    label: "Phase 2 — Validation layer"
+    status: specced_not_implemented
+    description: >
+      The adversarial layer. Phase 2 independently challenges gathered content,
+      checks sources, and analyses the whole repo for gaps and contradictions.
+
+    agents_active:
+      - all phase_1 agents
+      - critic
+      - auditor
+      - cartographer
+
+    commands_added:
+      - challenge
+      - verify
+      - gaps
+      - repo_docs
+      - repo_gaps
+
+    components_added:
+      - source_retrieval (Auditor)
+      - full_checkpoint_system
+      - signal_aggregator (partial — recording only; full computation in phase 3)
+
+    phase_gate:
+      description: >
+        A researcher can take a fully gathered phase-1 repo and run challenge,
+        verify, and gaps on it. Critical Critic findings block document progress.
+        Auditor failures flag unverifiable sources. The Cartographer produces a
+        prioritised research queue with gap documents distinguished by type.
+      proves: >
+        The deliberation principle has infrastructure. Bad claims get caught.
+        Gaps get named with enough specificity that the researcher knows what
+        kind of follow-up is warranted.
+
+  - id: phase_3
+    name: Self-improvement
+    label: "Phase 3 — Self-improvement"
+    status: specced_not_implemented
+    description: >
+      The repo learns. The Methodologist analyses accumulated signal and
+      proposes refined prompts. The library evolves with lineage preserved.
+
+    agents_active:
+      - all phase_2 agents
+      - methodologist
+
+    commands_added:
+      - refine
+      - prompt_show
+      - prompt_diff
+      - prompt_promote
+      - prompt_reject
+      - prompt_fork
+      - prompt_predictions
+      - repo_prompts
+
+    components_added:
+      - signal_aggregator (full — two-signal threshold, per-prompt counts)
+      - staleness_flagging
+
+    phase_gate:
+      description: >
+        After sufficient signal accumulation, the researcher runs omoikane refine.
+        The Methodologist performs ceiling detection, reviews prediction outcomes,
+        and produces at least one candidate with a testable prediction. The
+        researcher promotes or rejects it. Promotion records the prediction for
+        future outcome checking.
+      proves: >
+        The repo gets better at learning its own subject over time. The
+        improvement is inspectable and the researcher is in the loop on every
+        promotion.
+
+    known_uncertainty:
+      description: >
+        Phase 3 value scales with repo activity. A small or narrow-subject repo
+        may not accumulate two independent signals per prompt for a long time.
+        The Methodologist producing no candidates is correct behaviour; researchers
+        should not interpret it as a failure of phase 3.
+
+  - id: phase_4
+    name: Collaboration
+    label: "Phase 4 — Collaboration"
+    status: specced_not_implemented
+    description: >
+      Multiple researchers. The tool becomes a platform. Disagreement between
+      researchers is signal, not noise.
+
+    collaboration_models:
+      - id: CM1
+        name: shared_prompt_library
+        description: Methodology sharing without content sharing.
+        complexity: low
+        phase_4_sequence: first
+      - id: CM2
+        name: forked_repos
+        description: Independent research that can be merged.
+        complexity: medium
+        phase_4_sequence: second
+        note: Largely free given git-friendly structure from phases 1-3.
+      - id: CM3
+        name: shared_repo
+        description: Multiple researchers on one knowledge base.
+        complexity: high
+        phase_4_sequence: last
+        requires:
+          - author fields on claims and signal history
+          - contested-by-collaborators claim status
+          - outline amendment proposal and approval flow
+          - parallel gather recognition
+
+    schema_additions_required:
+      - id: P4-SA1
+        field: author
+        location: "signal_history entries, claim blocks"
+        description: Records which researcher produced a signal or claim.
+        backward_compatible: true
+        note: Optional field; absent in phases 1-3, populated in phase 4.
+      - id: P4-SA2
+        field: "contested-by-collaborators"
+        location: claim.status enumeration
+        description: >
+          Distinct from 'disputed' (Critic-originated). Records researcher
+          disagreement as a first-class finding.
+        backward_compatible: true
+        note: >
+          Requires extending the claim status enumeration. Phase 1-3 schemas
+          must not prevent this extension.
+      - id: P4-SA3
+        field: replication_run
+        location: manifest.documents array entries
+        description: >
+          Boolean flag that exempts a document from the single-active-document-
+          per-node constraint (MAN-VR1). Allows parallel gathers on the same
+          node to coexist as replication attempts.
+        backward_compatible: true
+        note: >
+          Absent (false) in phases 1-3. Phase 4 sets this for explicit
+          replication runs. The underlying constraint is a validation rule,
+          not a structural encoding — this makes the relaxation possible.
+
+    phase_gate:
+      description: >
+        Two researchers can independently gather on the same outline node,
+        compare their documents, and treat agreement/disagreement as signal.
+        They can share a prompt library. They can fork a repo and merge
+        gap documents and prompt libraries.
+      proves: >
+        Omoikane is a platform, not just a personal tool. Disagreement between
+        researchers is surfaced as signal. The deliberation principle extends
+        to collaborative use.
+
+# ---------------------------------------------------------------------------
+# Forward-compatibility requirements
+# ---------------------------------------------------------------------------
+# What phase 1 must preserve to avoid breaking later phases.
+
+forward_compatibility:
+
+  - id: FC1
+    for_phase: phase_2
+    requirement: >
+      Document schema must include challenge_findings, re_gather_candidate,
+      and the full status enumeration (including low-trust) from phase 1.
+    check: Document schema in spec/machine/schema/document.yaml includes these fields.
+    status: satisfied
+
+  - id: FC2
+    for_phase: phase_2
+    requirement: >
+      Signal history format must be compatible with the signal aggregator
+      index schema (signal_events table in persistence/model.yaml).
+    check: signal_history entry fields include signal_type (implicitly via entry type).
+    status: satisfied
+
+  - id: FC3
+    for_phase: phase_2
+    requirement: >
+      Checkpoint types and registry format must support all phase 2
+      checkpoint producers defined in cli/checkpoints.yaml.
+    check: checkpoints.yaml defines checkpoint producers for Critic, Auditor, Cartographer.
+    status: satisfied
+
+  - id: FC4
+    for_phase: phase_3
+    requirement: >
+      Prompt entry schema must include generation, parent, prediction, and
+      prediction_outcome from phase 1 — prompts created in phase 1 must be
+      promotable to lineage-tracked entries in phase 3 without migration.
+    check: spec/machine/schema/prompt_entry.yaml includes all four fields.
+    status: satisfied
+
+  - id: FC5
+    for_phase: phase_3
+    requirement: >
+      Signal history entries must include enough type information for the
+      signal aggregator to classify them as human_in_the_loop or ai_derived.
+    check: >
+      signal_history entry type enumeration in document.yaml maps to signal
+      categories in prompt_library/lifecycle.yaml signal_types.
+    status: satisfied
+    note: >
+      The mapping is implicit — entry types like claim_correction map to
+      user_correction signal type. The runner must make this mapping
+      explicit in its signal aggregator implementation.
+
+  - id: FC6
+    for_phase: phase_4
+    requirement: >
+      Signal history entries must not preclude an author field.
+    check: signal_history item fields in document.yaml do not conflict with an author field.
+    status: satisfied
+
+  - id: FC7
+    for_phase: phase_4
+    requirement: >
+      Claim status enumeration must be extensible for contested-by-collaborators.
+    check: >
+      Phase 1-3 schemas use a fixed enumeration but do not encode it as
+      an immutable set. The runner validates against the enumeration; adding
+      a new value is a schema version increment, not a structural change.
+    status: satisfied
+
+  - id: FC8
+    for_phase: phase_4
+    requirement: >
+      The single-active-document-per-node constraint must be a validation
+      rule, not a structural encoding, so phase 4 can relax it for
+      replication runs without schema migration.
+    check: >
+      MAN-VR1 in spec/machine/schema/manifest.yaml is defined as a
+      validation_rule, not a structural constraint on the YAML format.
+    status: satisfied
+
+# ---------------------------------------------------------------------------
+# Open questions
+# ---------------------------------------------------------------------------
+# Genuine uncertainties that the spec does not resolve. Must be addressed
+# during implementation. Not deferrable indefinitely.
+
+open_questions:
+
+  - id: OQ1
+    section_ref: "section4_prompt_library.md §4.6.3, prompt_library/lifecycle.yaml lineage_health"
+    description: >
+      The lineage_generation_threshold (currently 5) and
+      consecutive_refutation_threshold (currently 3) in lifecycle.yaml
+      are not empirically validated.
+    status: resolved
+    decision: >
+      Both thresholds are configurable per knowledge repo in
+      .omoikane/config.yaml under the methodology key. The values 5 and 3
+      remain the defaults when no config override is present. The runner
+      validates that overrides are positive integers >= 1.
+    decision_rationale: >
+      Making them configurable allows researchers to tune based on actual
+      signal accumulation rates without code changes. The right values are
+      genuinely unknown until real repos provide data.
+    spec_update: prompt_library/lifecycle.yaml lineage_health configurable fields
+
+  - id: OQ2
+    section_ref: "section7_roadmap.md §7.2"
+    description: >
+      Whether Ollama support ships in phase 1 or phase 2 is not resolved.
+    status: resolved
+    decision: >
+      Ollama is formally deferred to phase 2. Claude is the phase 1
+      minimum. OpenAI-compatible is optional in phase 1. The adapter
+      interface is fully specified in spec/machine/runner/adapter_interface.yaml
+      so that adding ollama.js in phase 2 requires only implementing that
+      interface — no other component requires modification.
+    decision_rationale: >
+      Practical priority decision, not a technical constraint. Phase 1
+      scope is kept tight. The model-agnostic architecture is proven by
+      the interface design, not by shipping multiple adapters simultaneously.
+    spec_update: spec/machine/runner/adapter_interface.yaml (new file)
+
+  - id: OQ3
+    section_ref: "section7_roadmap.md §7.8"
+    description: >
+      Parallel gather semantics in phase 4 are sketched but not fully specced.
+      How two replication documents are compared, what disagreement produces,
+      and how the researcher resolves divergent findings is unresolved.
+    status: resolved
+    decision: >
+      Deferred entirely to phase 4. The only forward-compatibility
+      requirement is FC8: MAN-VR1 must remain a validation rule, not a
+      structural encoding, so phase 4 can relax it without schema migration.
+      FC8 is already satisfied. The comparison algorithm, output types,
+      and resolution flow are phase 4 design problems.
+    decision_rationale: >
+      Designing a phase 4 mechanism without implementation experience risks
+      over-specifying a feature that may look different once phases 2-3 are
+      built and the claim and checkpoint model is better understood in practice.
+
+  - id: OQ4
+    section_ref: "section6_persistence.md §6.7"
+    description: >
+      The manifest merge conflict solution for phase 4 multi-researcher use
+      is not yet designed.
+    status: resolved
+    decision: >
+      Deferred entirely to phase 4. The only forward-compatibility
+      requirement is that the manifest must remain human-resolvable as a
+      fallback — already recorded in persistence/model.yaml git_friendliness.
+      The form of the solution (merge command, git driver, or other) is a
+      phase 4 design problem.
+    decision_rationale: >
+      Phase 4 designers will work from a fully-built manifest implementation.
+      Committing to a specific merge strategy before phases 2-3 are built
+      risks foreclosing better approaches.
+
+  - id: OQ5
+    section_ref: "section7_roadmap.md §7.8"
+    description: >
+      The definition of the confidence_delta baseline for the signal aggregator
+      is not precisely specified.
+    status: resolved
+    decision: >
+      The baseline is the repo-wide mean confidence of all active claims
+      across all active documents, computed at gather time. confidence_delta
+      equals the document's mean claim confidence minus this repo baseline.
+      Confidence levels map to numeric values: high=1.0, medium=0.67,
+      low=0.33, contested=0.50. Node-type-scoped baselines are a potential
+      future refinement but are not the initial design.
+    decision_rationale: >
+      A repo-wide mean recovers quickly from cold start, is non-circular,
+      and is computable in a single SQL query against the claims table.
+      Node-type-scoped means require meaningful node population before they
+      are stable, making them unreliable early in a repo's life.
+    spec_update: prompt_library/lifecycle.yaml confidence_delta section

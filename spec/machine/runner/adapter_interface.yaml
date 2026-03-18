@@ -1,0 +1,243 @@
+# adapter_interface.yaml
+#
+# Machine-readable specification of the adapter interface contract.
+# All adapters must implement this interface. The runner routes every
+# agent invocation through an adapter; adapters are interchangeable.
+#
+# This file also records the phase 1 adapter scope decision (OQ2):
+# Claude is required, OpenAI-compatible is optional, Ollama is deferred
+# to phase 2. Adding ollama.js in phase 2 requires only implementing
+# this interface — the runner and all other components require no change.
+#
+# Canonical human-readable rationale: spec/human/section2_agent_design.md §2.4
+# Phase scope decision: spec/machine/roadmap/phases.yaml OQ2
+
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Adapter scope by phase
+# ---------------------------------------------------------------------------
+
+adapter_scope:
+
+  - id: claude
+    file: src/runner/adapters/claude.js
+    phase: 1
+    status: required
+    api: Anthropic Messages API
+    note: >
+      The minimum adapter for phase 1 to ship. Phase 1 does not ship
+      without a working Claude adapter.
+
+  - id: openai
+    file: src/runner/adapters/openai.js
+    phase: 1
+    status: optional
+    api: OpenAI Chat Completions API
+    note: >
+      Also compatible with Azure OpenAI and local OpenAI-compatible
+      servers. Optional in phase 1.
+
+  - id: ollama
+    file: src/runner/adapters/ollama.js
+    phase: 2
+    status: deferred
+    api: Ollama REST API
+    note: >
+      Deferred to phase 2 as a practical priority decision, not a
+      technical constraint. The adapter interface is designed so that
+      adding ollama.js in phase 2 requires only implementing this
+      interface — the runner, output validation layer, smoke test
+      framework, and all other adapters require no modification.
+
+  - id: custom
+    file: src/runner/adapters/custom.js
+    phase: 1
+    status: optional
+    api: User-defined HTTP endpoint
+    note: >
+      Allows researchers to point the runner at any endpoint accepting
+      a text prompt and returning a text response. Prompt formatting
+      responsibility falls to the researcher.
+
+# ---------------------------------------------------------------------------
+# Interface contract
+# ---------------------------------------------------------------------------
+
+interface:
+  description: >
+    The contract every adapter must satisfy. The runner depends only on
+    this interface — it has no knowledge of which adapter is active or
+    how it formats prompts internally. Each adapter is an ES module at
+    src/runner/adapters/<name>.js exporting the methods below.
+
+methods:
+
+  - name: invoke
+    signature: "invoke(role, context, constitution) → AgentResponse"
+    description: >
+      Execute one agent invocation. Returns a structured AgentResponse
+      for the runner's output validation layer to assess.
+    parameters:
+      - name: role
+        type: string
+        description: "Agent role: architect | scribe | critic | auditor | cartographer | methodologist"
+      - name: context
+        type: object
+        description: >
+          Key-value pairs matching the agent's context_budget. The runner
+          has already validated that forbidden context keys are absent
+          before calling invoke.
+      - name: constitution
+        type: string
+        description: >
+          Epistemic constitution core_statement from
+          spec/machine/philosophy/epistemic_constitution.yaml.
+          The adapter must incorporate this into the prompt in a way
+          appropriate for its model. Never null.
+    returns:
+      type: AgentResponse
+    throws:
+      - AdapterConnectionError
+      - AdapterTimeoutError
+      - AdapterRateLimitError
+      - AdapterParseError
+
+  - name: smoke_test
+    signature: "smoke_test(role, test_case) → SmokeTestResult"
+    description: >
+      Run one smoke test case from spec/machine/agents/<role>_smoke_test.yaml.
+      Used by omoikane repo init and omoikane agent test.
+    parameters:
+      - name: role
+        type: string
+      - name: test_case
+        type: object
+        description: >
+          One test case object from the smoke test YAML. Contains: id,
+          type (connectivity | structural_compliance | output_validation |
+          adversarial), synthetic_input, expected_behaviour.
+    returns:
+      type: SmokeTestResult
+    throws:
+      - AdapterConnectionError
+
+  - name: get_model_id
+    signature: "get_model_id() → string"
+    description: >
+      Returns the model identifier as it will be recorded in document
+      provenance (provenance.model field).
+    returns:
+      type: string
+      example: "claude-sonnet-4-6"
+
+  - name: get_adapter_id
+    signature: "get_adapter_id() → string"
+    description: >
+      Returns the adapter identifier as it will be recorded in document
+      provenance (provenance.adapter field).
+    returns:
+      type: string
+      example: "claude"
+
+# ---------------------------------------------------------------------------
+# Response schemas
+# ---------------------------------------------------------------------------
+
+response_schema:
+  name: AgentResponse
+  fields:
+    - name: raw_text
+      type: string
+      required: true
+      description: Full model response text before parsing. Stored for audit.
+    - name: parsed
+      type: object
+      required: true
+      description: >
+        Response parsed into the structure expected by the agent's
+        output_schema. If parsing fails, the adapter raises AdapterParseError
+        rather than returning a partial object.
+    - name: model_id
+      type: string
+      required: true
+      description: >
+        Model identifier as returned by the API for this invocation.
+        Stored in document provenance.
+    - name: token_usage
+      type: object
+      required: false
+      description: >
+        Input and output token counts if reported by the model.
+        Fields: input_tokens (int), output_tokens (int). Used for
+        monitoring. Omitted if the adapter cannot report token usage.
+
+smoke_test_result_schema:
+  name: SmokeTestResult
+  fields:
+    - name: test_id
+      type: string
+      required: true
+    - name: passed
+      type: boolean
+      required: true
+    - name: failure_reason
+      type: string
+      required: false
+      description: Human-readable explanation. Present when passed is false.
+    - name: failure_detail
+      type: object
+      required: false
+      description: >
+        Structured detail when passed is false. For structural_compliance
+        failures: lists missing or invalid fields. For adversarial failures:
+        includes what the model produced vs what was expected.
+
+# ---------------------------------------------------------------------------
+# Error types
+# ---------------------------------------------------------------------------
+
+error_types:
+
+  - name: AdapterConnectionError
+    description: Endpoint unreachable or authentication failed before any response
+    runner_action: Surface as exit code 5. Do not retry.
+
+  - name: AdapterTimeoutError
+    description: Model did not respond within the configured timeout
+    runner_action: Surface as exit code 5. Log the timeout duration.
+
+  - name: AdapterRateLimitError
+    description: API rate limit reached
+    runner_action: >
+      Retry with exponential backoff up to 3 attempts, then surface
+      as exit code 5.
+
+  - name: AdapterParseError
+    description: Model response could not be parsed into the expected output_schema structure
+    runner_action: >
+      Surface as exit code 3 (output failed validation). Message:
+      "Adapter could not parse model response into expected structure.
+      Raw response logged. Check model or prompt configuration."
+
+# ---------------------------------------------------------------------------
+# Context isolation contract
+# ---------------------------------------------------------------------------
+
+context_isolation:
+  description: >
+    The runner enforces agent context budgets before invoking any adapter.
+    The adapter receives only context that has already been validated
+    against the agent's context_budget. Adapters must not add context
+    beyond what is passed to invoke().
+  forbidden_additions:
+    - Other agents' conversation history
+    - Other documents from the same repo not in the context parameter
+    - The calling agent's prior outputs in the same session
+    - Any information not explicitly passed in the context parameter
+  rationale: >
+    Context isolation is a structural constraint enforced at the adapter
+    boundary. Cross-context contamination — the Scribe seeing the
+    Architect's reasoning, the Critic seeing the Scribe's self-critique —
+    would undermine the deliberation model. The adapter layer is the
+    enforcement point.

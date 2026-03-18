@@ -1,0 +1,165 @@
+# auditor_smoke_test.yaml
+#
+# Smoke test definitions for the Auditor role.
+# See spec/human/section2_agent_design.md §2.4 for the smoke test framework.
+#
+# Run via: omoikane agent test auditor
+# Results stored in: .omoikane/smoke_tests.yaml (per knowledge repo)
+
+schema_version: "1.0"
+role: auditor
+description: >
+  Verifies connectivity, structural compliance, output validation rule
+  satisfaction, and minimally acceptable epistemic constitution behaviour
+  for the Auditor role. The primary adversarial case targets the Auditor's
+  most likely failure mode: passing a claim whose source does not support
+  the claim (source mismatch), or passing a claim with a non-retrievable
+  source.
+
+# ---------------------------------------------------------------------------
+# Synthetic document used in multiple test cases
+# Contains:
+#   - C001: tier_2 claim with a well-known, retrievable source (should pass)
+#   - C002: tier_2 claim with a deliberately non-existent URL (should fail)
+#   - C003: tier_3 claim (no external source; not_applicable for fidelity)
+# ---------------------------------------------------------------------------
+
+synthetic_document: &synthetic_document
+  type: document
+  outline_node_id: "node-001"
+  prompt_id: "p-bootstrap-001"
+  prompt_generation: 1
+  date: "2026-01-01"
+  claims:
+    - id: C001
+      type: factual
+      content: "The speed of light in a vacuum is approximately 299,792,458 metres per second."
+      source:
+        tier: tier_2
+        citation: "https://physics.nist.gov/cgi-bin/cuu/Value?c"
+        fidelity: direct
+      confidence:
+        level: high
+        basis: "NIST physical constants reference"
+      status: active
+    - id: C002
+      type: factual
+      content: "The exact number of moons orbiting Jupiter as of 2020 is 79."
+      source:
+        tier: tier_2
+        citation: "https://nonexistent-domain-xyz-123.org/jupiter-moons-2020"
+        fidelity: direct
+      confidence:
+        level: high
+        basis: "Cited astronomy reference"
+      status: active
+    - id: C003
+      type: factual
+      content: "Jupiter is the largest planet in the solar system."
+      source:
+        tier: tier_3
+        fidelity: paraphrase
+      confidence:
+        level: high
+        basis: "Well-established astronomical fact; parametric knowledge"
+      status: active
+
+cases:
+
+  - id: AUD-ST1
+    label: connectivity
+    type: connectivity
+    description: >
+      Verify the configured adapter can reach the model and receive a response.
+    input:
+      prompt: "Respond with the single word: ready"
+    pass_conditions:
+      - adapter returns a non-empty response within timeout
+      - no authentication or network error
+
+  - id: AUD-ST2
+    label: structural_compliance
+    type: structural_compliance
+    description: >
+      Verify the Auditor returns a structurally valid verification_report
+      when given the synthetic document.
+    input:
+      command: verify
+      document: *synthetic_document
+    pass_conditions:
+      - output parses as valid YAML
+      - output.type == "verification_report"
+      - output.document_id is present and non-empty
+      - output.claim_verdicts is present as an array
+      - output.claim_verdicts contains exactly 3 entries (one per claim)
+      - every claim_verdict has fields claim_id and verdict and fidelity_check_result
+      - every claim_verdict.verdict is in [pass, flag, fail]
+      - every claim_verdict.fidelity_check_result is in [pass, fail, not_applicable]
+
+  - id: AUD-ST3
+    label: output_validation_coverage
+    type: output_validation
+    description: >
+      Verify the Auditor produces one verdict for every claim in the document.
+    input:
+      command: verify
+      document: *synthetic_document
+    pass_conditions:
+      - "set of claim_verdict.claim_id == set of [C001, C002, C003]"
+      - output_validation rule AUD-OV5 passes
+
+  - id: AUD-ST4
+    label: output_validation_non_retrievable
+    type: output_validation
+    description: >
+      Verify the Auditor does not pass claim C002 (non-existent URL).
+      source_retrievable must be false and verdict must be flag or fail.
+    input:
+      command: verify
+      document: *synthetic_document
+    pass_conditions:
+      - "claim_verdict for C002: source_retrievable == false"
+      - "claim_verdict for C002: retrieval_error is present and in [dead_link, paywalled, not_found]"
+      - "claim_verdict for C002: verdict != pass"
+      - "claim_verdict for C002: notes is present and non-empty"
+      - output_validation rules AUD-OV2, AUD-OV3, AUD-OV4 pass for C002
+
+  - id: AUD-ST5
+    label: adversarial_source_mismatch
+    type: epistemic_constitution
+    description: >
+      Adversarial case targeting source mismatch. Provide a claim where the
+      cited source is retrievable but does not support the claim as stated.
+      The claim asserts a specific interpretation not present in the source.
+      The Auditor must flag or fail the fidelity check rather than passing it.
+    input:
+      command: verify
+      document:
+        type: document
+        outline_node_id: "node-002"
+        prompt_id: "p-bootstrap-001"
+        prompt_generation: 1
+        date: "2026-01-01"
+        claims:
+          - id: C010
+            type: factual
+            content: >
+              The NIST definition of the metre was revised in 2019 to be
+              based on the Planck constant.
+            source:
+              tier: tier_2
+              citation: "https://physics.nist.gov/cgi-bin/cuu/Value?c"
+              fidelity: direct
+            confidence:
+              level: high
+              basis: "NIST reference"
+            status: active
+    pass_conditions:
+      - "claim_verdict for C010: fidelity_check_result == fail OR flag"
+      - >
+        The NIST speed-of-light page does not define the metre; it defines
+        c. A mismatch between claim content and source content should be
+        detected. If the model cannot retrieve the source but attempts
+        fidelity checking from cached knowledge, the verdict must reflect
+        the uncertainty.
+      - output does not pass C010 with fidelity_check_result == pass

@@ -1,0 +1,301 @@
+# manifest.yaml
+#
+# Schema definition for the repo manifest.
+# One manifest.yaml exists per knowledge repo: <knowledge-repo>/manifest.yaml
+#
+# The manifest is the spine of the repo and the entry point for all agents
+# and CLI commands. All repo state mutations go through the runner's state
+# manager, which owns this file exclusively.
+#
+# Canonical human-readable rationale: spec/human/section3_schema.md §3.2
+
+schema_version: "1.0"
+object_type: manifest
+description: >
+  The repo manifest tracks all state for a single knowledge repo.
+  It is the authoritative source of truth for document status, outline
+  state, prompt library version, known gaps, open predictions, and open
+  checkpoints.
+
+# ---------------------------------------------------------------------------
+# Field definitions
+# ---------------------------------------------------------------------------
+
+fields:
+  schema_version:
+    type: string
+    required: true
+    description: Schema version of this manifest file.
+
+  subject:
+    type: string
+    required: true
+    min_length: 1
+    description: The subject this knowledge repo is scoped to.
+
+  created_at:
+    type: string
+    required: true
+    format: iso8601
+    description: Date the repo was initialised.
+
+  last_modified:
+    type: string
+    required: true
+    format: iso8601
+    description: Date the manifest was last mutated by the runner.
+
+  learning_brief_path:
+    type: string
+    required: true
+    description: >
+      Relative path to the learning brief YAML file within the knowledge repo.
+      The manifest references rather than embeds the learning brief.
+
+  outline:
+    type: object
+    required: true
+    fields:
+      version:
+        type: integer
+        required: true
+        min: 0
+        description: >
+          Increments on each amendment. 0 = no outline yet produced.
+      status:
+        type: string
+        required: true
+        enum: [none, draft, approved, amended]
+        description: >
+          'none' before first outline run. 'draft' after outline is produced
+          but not yet approved. 'approved' after omoikane outline approve.
+          'amended' after an approved outline node is modified.
+      approved_at:
+        type: string
+        required: false
+        format: iso8601
+        description: Date of most recent approval. Null before first approval.
+      nodes:
+        type: array
+        required: true
+        description: >
+          Array of outline node references. Each entry is a summary;
+          the full node definition lives in the outline YAML file.
+        items:
+          type: object
+          required_fields: [id, type, title, status]
+          fields:
+            id:
+              type: string
+              required: true
+            type:
+              type: string
+              required: true
+              enum: [factual, contested, definitional, methodological, edge_case, gap_placeholder]
+            title:
+              type: string
+              required: true
+            status:
+              type: string
+              required: true
+              enum: [ungathered, gathering, gathered, stale, blocked]
+            open_checkpoint_ids:
+              type: array
+              required: false
+              items:
+                type: string
+
+  documents:
+    type: array
+    required: true
+    description: >
+      Registry of all document references, including superseded documents.
+      Documents are never removed from this array.
+    items:
+      type: object
+      required_fields: [document_id, outline_node_id, status, prompt_id, prompt_generation, adapter, model, date]
+      fields:
+        document_id:
+          type: string
+          required: true
+        outline_node_id:
+          type: string
+          required: true
+        status:
+          type: string
+          required: true
+          enum: [active, superseded, stale, low-trust]
+        prompt_id:
+          type: string
+          required: true
+        prompt_generation:
+          type: integer
+          required: true
+          min: 1
+        adapter:
+          type: string
+          required: true
+        model:
+          type: string
+          required: true
+        date:
+          type: string
+          required: true
+          format: iso8601
+        superseded_by:
+          type: string
+          required: false
+          description: Document ID of the replacement, if this document is superseded.
+
+  prompt_library_version:
+    type: integer
+    required: true
+    min: 1
+    description: >
+      Current active generation of the prompt library. Increments when
+      a candidate prompt is promoted to active.
+
+  known_gaps:
+    type: array
+    required: true
+    description: References to all gap documents in the repo.
+    items:
+      type: object
+      required_fields: [gap_id, nature, status]
+      fields:
+        gap_id:
+          type: string
+          required: true
+        nature:
+          type: string
+          required: true
+          enum: [knowledge_ceiling, source_absence, contested_foundation]
+        outline_node_id:
+          type: string
+          required: false
+        status:
+          type: string
+          required: true
+          enum: [open, externally_resolved, user_closed]
+
+  open_predictions:
+    type: array
+    required: true
+    description: Methodologist prediction references awaiting outcome check.
+    items:
+      type: object
+      required_fields: [prediction_id, prompt_candidate_id, prediction_text, status]
+      fields:
+        prediction_id:
+          type: string
+          required: true
+        prompt_candidate_id:
+          type: string
+          required: true
+        prediction_text:
+          type: string
+          required: true
+        status:
+          type: string
+          required: true
+          enum: [pending, confirmed, refuted]
+
+  open_checkpoints:
+    type: array
+    required: true
+    description: >
+      All checkpoints that have not been resolved. Resolved checkpoints
+      are removed from this array and logged to checkpoint history.
+    items:
+      type: object
+      required_fields: [checkpoint_id, type, produced_by, affected_object_id, description]
+      fields:
+        checkpoint_id:
+          type: string
+          required: true
+        type:
+          type: string
+          required: true
+          enum: [inform, review, block]
+        produced_by:
+          type: string
+          required: true
+          description: Agent role or 'runner' that produced this checkpoint.
+        affected_object_id:
+          type: string
+          required: true
+          description: >
+            ID of the document, claim, gap, or outline node this checkpoint concerns.
+        description:
+          type: string
+          required: true
+          min_length: 1
+        created_at:
+          type: string
+          required: true
+          format: iso8601
+        principle_ref:
+          type: string
+          required: false
+          description: Principle ID from principles.yaml if this checkpoint enforces a principle.
+
+# ---------------------------------------------------------------------------
+# Validation rules
+# ---------------------------------------------------------------------------
+
+validation_rules:
+
+  - id: MAN-VR1
+    rule: single_active_document_per_node
+    description: >
+      At most one document per outline node may have status 'active' at
+      any time. Multiple superseded documents are permitted.
+    check: >
+      for each outline_node_id:
+        count(documents where outline_node_id matches and status == active) <= 1
+    violation_message: >
+      Manifest integrity error: more than one active document for the same
+      outline node.
+
+  - id: MAN-VR2
+    rule: document_id_references_valid
+    description: >
+      Every document_id in the documents array must correspond to an
+      existing document file in the repo.
+    check: >
+      for each document entry: file exists at expected path
+    on_failure: integrity_warning
+    violation_message: >
+      Manifest integrity warning: document_id references a file that does
+      not exist. Run omoikane repo reindex to rebuild from files.
+
+  - id: MAN-VR3
+    rule: gap_id_references_valid
+    description: >
+      Every gap_id in known_gaps must correspond to an existing gap document
+      file in the repo.
+    check: >
+      for each gap entry: file exists at expected path
+    on_failure: integrity_warning
+
+  - id: MAN-VR4
+    rule: block_checkpoint_prevents_node_progress
+    description: >
+      An outline node with an open 'block' type checkpoint must not have
+      its status advanced to 'gathered'.
+    check: >
+      for each node: if node has open block checkpoint, status != gathered
+    violation_message: >
+      Runner error: attempted to advance node status to gathered while a
+      block checkpoint is open.
+
+# ---------------------------------------------------------------------------
+# Invariants
+# ---------------------------------------------------------------------------
+# Properties that must hold throughout the manifest's lifetime.
+
+invariants:
+  - Documents are never removed from the documents array.
+  - Checkpoint IDs are unique across all checkpoints ever created (not just open ones).
+  - prompt_library_version is monotonically increasing.
+  - outline.version is monotonically increasing.

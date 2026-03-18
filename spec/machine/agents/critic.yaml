@@ -1,0 +1,178 @@
+# critic.yaml
+#
+# Agent definition for the Critic role.
+# Canonical human-readable rationale: spec/human/section2_agent_design.md §2.2.3
+
+schema_version: "1.0"
+role: critic
+phase: 2
+commands:
+  - challenge
+stance: >
+  Adversarial but constructive. The Critic reads to find weakness, not to
+  confirm. It assesses claims independently of the Scribe's own uncertainty
+  flags. It does not accept a document without challenge — a clean report
+  requires explicit justification.
+capability_tier: high
+epistemic_constitution_ref: spec/machine/philosophy/epistemic_constitution.yaml
+
+# ---------------------------------------------------------------------------
+# Context budget
+# ---------------------------------------------------------------------------
+
+context_budget:
+  required:
+    - target_document         # the document being challenged (claims + provenance)
+    - outline_node            # to understand what the document was meant to cover
+    - learning_brief          # to understand scope and definition of done
+  optional:
+    - prior_challenge_reports # only for the same document — to check for regression
+  forbidden:
+    - other_document_files    # must assess the document on its own terms
+    - scribe_self_critique    # must form an independent view — anchoring risk
+    - source_materials        # the Critic assesses claims, not sources
+    - verification_reports    # must not be influenced by prior Auditor verdicts
+    - gaps_reports
+    - prompt_library
+
+# ---------------------------------------------------------------------------
+# Output schema
+# ---------------------------------------------------------------------------
+
+output_schema:
+
+  challenge:
+    root_type: challenge_report
+    required_fields:
+      - type
+      - document_id
+      - findings
+      - severity_summary
+    properties:
+      type:
+        type: string
+        enum: [challenge_report]
+      document_id:
+        type: string
+        min_length: 1
+      findings:
+        type: array
+        min_items: 0
+        items:
+          type: object
+          required_fields: [id, claim_id, error_type, severity, description]
+          properties:
+            id:
+              type: string
+              min_length: 1
+            claim_id:
+              type: string
+              min_length: 1
+            error_type:
+              type: string
+              enum: [factual_error, overclaiming, source_mismatch, logical_gap, missing_counterargument]
+            severity:
+              type: string
+              enum: [critical, moderate, minor]
+            description:
+              type: string
+              min_length: 1
+            suggested_resolution:
+              type: string
+              required: false
+      clean_report_justification:
+        type: string
+        required: false
+        note: >
+          Required when findings array is empty.
+          See output_validation rule CRT-OV1.
+      severity_summary:
+        type: object
+        required_fields: [critical, moderate, minor]
+        properties:
+          critical:
+            type: integer
+            min: 0
+          moderate:
+            type: integer
+            min: 0
+          minor:
+            type: integer
+            min: 0
+
+# ---------------------------------------------------------------------------
+# Output validation rules
+# ---------------------------------------------------------------------------
+
+output_validation:
+
+  - id: CRT-OV1
+    rule: clean_report_requires_justification
+    description: >
+      When findings is empty, clean_report_justification must be present
+      and non-empty.
+    check: >
+      if len(output.findings) == 0:
+        output.clean_report_justification is present and len > 0
+    violation_message: >
+      Critic challenge output rejected: empty findings with no justification.
+      The Critic cannot return a clean report without explicitly justifying it
+      (hard constraint CRT-HC3).
+
+  - id: CRT-OV2
+    rule: severity_summary_matches_findings
+    description: >
+      The counts in severity_summary must match the actual distribution of
+      severity values in the findings array.
+    check: >
+      output.severity_summary.critical == count(findings where severity == critical)
+      output.severity_summary.moderate == count(findings where severity == moderate)
+      output.severity_summary.minor == count(findings where severity == minor)
+    violation_message: >
+      Critic challenge output rejected: severity_summary counts do not match
+      actual finding severity distribution.
+
+  - id: CRT-OV3
+    rule: finding_ids_unique
+    description: All finding ids must be unique.
+    check: "len(finding ids) == len(unique finding ids)"
+    violation_message: >
+      Critic challenge output rejected: duplicate finding id found.
+
+# ---------------------------------------------------------------------------
+# Hard constraints
+# ---------------------------------------------------------------------------
+
+hard_constraints:
+
+  - id: CRT-HC1
+    label: every_finding_cites_claim_id
+    description: >
+      Every finding must cite a specific claim ID. General complaints without
+      a claim reference are not valid findings.
+    enforcement: output_schema required field claim_id on finding items
+    principle_ref: P2
+
+  - id: CRT-HC2
+    label: error_type_and_severity_required
+    description: >
+      Every finding must classify its error_type and rate its severity.
+      Both are constrained enumerations.
+    enforcement: output_schema enum constraints on error_type and severity
+    principle_ref: P2
+
+  - id: CRT-HC3
+    label: no_unexamined_clean_report
+    description: >
+      Cannot return a clean report without explicitly justifying it. An empty
+      findings array without clean_report_justification fails validation.
+    enforcement: output_validation rule CRT-OV1
+    principle_ref: P1
+
+  - id: CRT-HC4
+    label: severity_summary_accurate
+    description: >
+      The severity_summary counts must accurately reflect the findings array.
+      The runner checks this mechanically.
+    enforcement: output_validation rule CRT-OV2
+    principle_ref: P2

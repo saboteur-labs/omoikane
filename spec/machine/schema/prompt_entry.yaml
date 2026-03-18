@@ -1,0 +1,252 @@
+# prompt_entry.yaml
+#
+# Schema definition for the prompt entry.
+# File pattern: <knowledge-repo>/prompts/<prompt-id>.yaml
+#
+# A prompt entry is a structured object, not a plain string. Prompts
+# carry lineage, rationale, performance data, and testable predictions.
+# They evolve through generations. Full treatment of the prompt library
+# and refinement lifecycle is in section 4.
+#
+# Canonical human-readable rationale: spec/human/section3_schema.md §3.6
+
+schema_version: "1.0"
+object_type: prompt_entry
+description: >
+  A prompt entry is the unit of the prompt library. It records the prompt
+  text, its lineage (what it evolved from), its rationale (treated as a
+  hypothesis), its performance data, and a testable prediction of what
+  better results would look like if it works.
+
+# ---------------------------------------------------------------------------
+# Field definitions
+# ---------------------------------------------------------------------------
+
+fields:
+  schema_version:
+    type: string
+    required: true
+
+  type:
+    type: string
+    required: true
+    enum: [prompt_entry]
+
+  id:
+    type: string
+    required: true
+    description: Unique prompt ID within the repo.
+
+  prompt_type:
+    type: string
+    required: true
+    enum: [gather, challenge, verify, gaps, refine, init, outline]
+    description: Which agent command this prompt is for.
+
+  target:
+    type: string
+    required: false
+    description: >
+      Outline node ID or topic scope this prompt is targeted at.
+      Null for general-purpose prompts.
+
+  status:
+    type: string
+    required: true
+    enum: [active, candidate, deprecated]
+    description: >
+      active: current, approved for use by the relevant agent.
+      candidate: proposed by the Methodologist, awaiting researcher promotion.
+      deprecated: was once active, superseded, retained for lineage.
+
+  origin:
+    type: string
+    required: true
+    enum: [system, user, refine-generated]
+    description: >
+      system: bootstrap prompt created at repo init.
+      user: written directly by the researcher.
+      refine-generated: produced by the Methodologist as a candidate.
+
+  generation:
+    type: integer
+    required: true
+    min: 1
+    description: >
+      Generation counter. Gen-1 prompts are bootstrap prompts.
+      Increments each time this lineage is refined. Used by the
+      Methodologist to identify long lineages that may be encoding
+      accumulated small errors.
+
+  parent:
+    type: string
+    required: false
+    description: >
+      Prompt ID this evolved from. Null for generation-1 prompts.
+      Preserves the full lineage tree — prompts can fork (one parent,
+      multiple children) but each prompt has at most one parent.
+
+  question:
+    type: string
+    required: true
+    min_length: 1
+    description: The actual prompt text given to the agent.
+
+  rationale:
+    type: string
+    required: true
+    min_length: 1
+    description: >
+      Why this framing was chosen — treated as a hypothesis, not a conclusion.
+      The rationale records what the prompt author believed would make this
+      framing more effective than alternatives. It is tested against the
+      prediction outcome.
+
+  performance:
+    type: object
+    required: true
+    description: Performance data from runs of this prompt.
+    fields:
+      last_used:
+        type: string
+        required: true
+        format: iso8601
+        description: Date this prompt was most recently used in a gather run.
+      run_count:
+        type: integer
+        required: true
+        min: 0
+        description: Total number of times this prompt has been used.
+      produced_sources:
+        type: integer
+        required: true
+        min: 0
+        description: >
+          Average number of tier-1 and tier-2 sources produced per run.
+          Updated by the runner after each gather.
+      confidence_delta:
+        type: number
+        required: true
+        description: >
+          Average change in document confidence level relative to baseline,
+          on a scale of -1.0 to 1.0. Positive means this prompt tends to
+          produce higher-confidence documents than the repo average.
+      user_rating:
+        type: number
+        required: true
+        min: 0
+        max: 5
+        description: >
+          Researcher-assigned quality rating (0–5). Set via omoikane resolve
+          or omoikane prompt rate. Unrated prompts have a default of 0.
+
+  prediction:
+    type: string
+    required: false
+    min_length: 1
+    description: >
+      A testable statement of what better results would look like if this
+      prompt is more effective than its parent. Required for all
+      refine-generated prompts (enforced by methodologist.yaml MET-HC6).
+      Optional for system and user prompts, but recommended.
+
+  prediction_outcome:
+    type: string
+    required: false
+    enum: [pending, confirmed, refuted]
+    description: >
+      Outcome of the prediction check. Null until the prediction has been
+      assessed. Set by the Methodologist during a refine run and confirmed
+      by the runner after the researcher accepts the assessment.
+
+  created_at:
+    type: string
+    required: true
+    format: iso8601
+
+  deprecated_at:
+    type: string
+    required: false
+    format: iso8601
+    description: Date this prompt was deprecated. Null for active and candidate prompts.
+
+  deprecation_reason:
+    type: string
+    required: false
+    description: >
+      Why this prompt was deprecated. Required when deprecated_at is set.
+      Retained so lineage reasoning is not lost.
+
+# ---------------------------------------------------------------------------
+# Validation rules
+# ---------------------------------------------------------------------------
+
+validation_rules:
+
+  - id: PRM-VR1
+    rule: refine_generated_requires_prediction
+    description: >
+      Prompts with origin 'refine-generated' must have a non-empty prediction
+      field. This is also enforced at Methodologist output validation
+      (MET-HC6 in methodologist.yaml).
+    check: >
+      if origin == refine-generated:
+        prediction is present and len > 0
+    violation_message: >
+      Prompt entry rejected: refine-generated prompt has no prediction.
+
+  - id: PRM-VR2
+    rule: refine_generated_requires_parent
+    description: >
+      Prompts with origin 'refine-generated' must have a parent prompt ID.
+      The Methodologist cannot generate a prompt from nothing.
+    check: >
+      if origin == refine-generated:
+        parent is present and non-empty
+    violation_message: >
+      Prompt entry rejected: refine-generated prompt has no parent.
+
+  - id: PRM-VR3
+    rule: deprecated_requires_reason
+    description: >
+      Deprecated prompts must have a deprecation_reason.
+    check: >
+      if status == deprecated:
+        deprecation_reason is present and non-empty
+    violation_message: >
+      Prompt entry rejected: deprecated prompt has no deprecation_reason.
+
+  - id: PRM-VR4
+    rule: candidate_status_not_set_by_methodologist_to_active
+    description: >
+      The Methodologist cannot produce a prompt entry with status 'active'.
+      All Methodologist outputs have status 'candidate'. This is also
+      enforced at Methodologist output validation (MET-OV5).
+    check: >
+      if origin == refine-generated:
+        status == candidate
+    violation_message: >
+      Prompt entry rejected: refine-generated prompt has status other than
+      'candidate'. Promotion requires a human action.
+
+  - id: PRM-VR5
+    rule: generation_consistent_with_parent
+    description: >
+      A prompt's generation must be greater than its parent's generation.
+    check: >
+      if parent is not null:
+        generation > parent_prompt.generation
+    on_failure: integrity_warning
+    violation_message: >
+      Prompt entry integrity warning: generation is not greater than
+      parent generation. Lineage may be inconsistent.
+
+# ---------------------------------------------------------------------------
+# Invariants
+# ---------------------------------------------------------------------------
+
+invariants:
+  - Prompt entries are never deleted — deprecated prompts are retained for lineage.
+  - Promotion from candidate to active is a researcher action via CLI only.
+  - The parent field, once set, is immutable — lineage cannot be rewritten.
+  - performance data is updated by the runner after each use; not editable directly.

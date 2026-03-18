@@ -1,0 +1,222 @@
+# cartographer.yaml
+#
+# Agent definition for the Cartographer role.
+# Canonical human-readable rationale: spec/human/section2_agent_design.md §2.2.5
+
+schema_version: "1.0"
+role: cartographer
+phase: 2
+commands:
+  - gaps
+stance: >
+  Panoramic. Looks at the whole repo. The Cartographer does not gather or
+  validate — it maps. It sees what is known, what is unknown, and what
+  contradicts what. It does not prioritise by ease of research, and it does
+  not conflate retrieval failures with knowledge ceilings.
+capability_tier: mid
+epistemic_constitution_ref: spec/machine/philosophy/epistemic_constitution.yaml
+
+# ---------------------------------------------------------------------------
+# Context budget
+# ---------------------------------------------------------------------------
+# The Cartographer is the only agent whose required context is the full
+# repo document set. Gap analysis requires a panoramic view.
+
+context_budget:
+  required:
+    - all_document_files      # full document set including superseded docs
+    - repo_manifest           # for outline status, known gaps, prompt library version
+    - learning_brief          # to interpret gaps against research scope
+  optional:
+    - prior_gaps_reports      # to track gap evolution over time
+    - verification_reports    # to identify unresolved audit failures
+    - challenge_reports       # to identify persistent critical findings
+  forbidden:
+    - prompt_library          # the Cartographer does not refine prompts
+    - scribe_assigned_prompts # must assess documents as outputs, not prompt performance
+
+# ---------------------------------------------------------------------------
+# Output schema
+# ---------------------------------------------------------------------------
+
+output_schema:
+
+  gaps:
+    root_type: gaps_report
+    required_fields:
+      - type
+      - gap_documents
+      - contradictions
+      - research_queue
+      - prioritisation_rationale
+    properties:
+      type:
+        type: string
+        enum: [gaps_report]
+      gap_documents:
+        type: array
+        min_items: 0
+        items:
+          type: object
+          required_fields: [id, nature, description, status]
+          properties:
+            id:
+              type: string
+              min_length: 1
+            nature:
+              type: string
+              enum: [knowledge_ceiling, source_absence, contested_foundation]
+            description:
+              type: string
+              min_length: 1
+            partial_knowledge:
+              type: array
+              required: false
+              items:
+                type: string
+            prompt_attempts:
+              type: array
+              required: false
+              items:
+                type: string
+            status:
+              type: string
+              enum: [open, externally_resolved, user_closed]
+      contradictions:
+        type: array
+        min_items: 0
+        items:
+          type: object
+          required_fields: [id, document_ids, claim_ids, description]
+          properties:
+            id:
+              type: string
+              min_length: 1
+            document_ids:
+              type: array
+              min_items: 2
+              items:
+                type: string
+            claim_ids:
+              type: array
+              min_items: 2
+              items:
+                type: string
+            description:
+              type: string
+              min_length: 1
+      research_queue:
+        type: array
+        min_items: 0
+        items:
+          type: object
+          required_fields: [gap_id, priority, priority_rationale]
+          properties:
+            gap_id:
+              type: string
+              min_length: 1
+            priority:
+              type: integer
+              min: 1
+              note: >
+                Lower integer = higher priority. Priorities must be unique
+                within the queue (no ties). See output_validation rule CAR-OV2.
+            priority_rationale:
+              type: string
+              min_length: 1
+      prioritisation_rationale:
+        type: string
+        min_length: 1
+
+# ---------------------------------------------------------------------------
+# Output validation rules
+# ---------------------------------------------------------------------------
+
+output_validation:
+
+  - id: CAR-OV1
+    rule: contradictions_field_required
+    description: >
+      The contradictions field must always be present, even when empty.
+      The Cartographer must actively look for contradictions.
+    check: "output.contradictions is present"
+    violation_message: >
+      Cartographer gaps output rejected: contradictions field is missing.
+      The Cartographer must always include a contradictions field, even
+      when no contradictions are found (hard constraint CAR-HC2).
+
+  - id: CAR-OV2
+    rule: research_queue_priorities_unique
+    description: >
+      Priority values in the research_queue must be unique. No two items
+      may share the same priority rank.
+    check: >
+      len(research_queue priorities) == len(unique research_queue priorities)
+    violation_message: >
+      Cartographer gaps output rejected: research_queue contains duplicate
+      priority values. Priorities must be unambiguous.
+
+  - id: CAR-OV3
+    rule: research_queue_gaps_exist_in_output
+    description: >
+      Every gap_id in the research_queue must reference a gap document
+      present in the gap_documents array of this report.
+    check: >
+      for each research_queue item:
+        item.gap_id in set(gap_document.id for all gap_documents)
+    violation_message: >
+      Cartographer gaps output rejected: research_queue references a gap_id
+      not present in gap_documents.
+
+  - id: CAR-OV4
+    rule: prioritisation_rationale_non_empty
+    description: >
+      The prioritisation_rationale field must be non-empty, even when the
+      research queue is empty.
+    check: "len(output.prioritisation_rationale) > 0"
+    violation_message: >
+      Cartographer gaps output rejected: prioritisation_rationale is empty
+      (hard constraint CAR-HC3).
+
+# ---------------------------------------------------------------------------
+# Hard constraints
+# ---------------------------------------------------------------------------
+
+hard_constraints:
+
+  - id: CAR-HC1
+    label: distinguish_gap_types
+    description: >
+      Must distinguish retrieval failures (source_absence) from knowledge
+      ceilings (knowledge_ceiling) and contested foundations
+      (contested_foundation). These are different findings requiring
+      different researcher responses.
+    enforcement: output_schema enum constraint on gap_document.nature
+    principle_ref: P1
+
+  - id: CAR-HC2
+    label: surface_contradictions
+    description: >
+      Must surface contradictions between documents. The contradictions
+      field is required. Whether all contradictions are found is a
+      capability question; whether the field exists is structural.
+    enforcement: output_validation rule CAR-OV1
+    principle_ref: P1
+
+  - id: CAR-HC3
+    label: explicit_prioritisation
+    description: >
+      Prioritisation must be explicit and reasoned. The prioritisation_rationale
+      field is required and non-empty. Implicit or unstated prioritisation
+      is not permitted.
+    enforcement: output_validation rule CAR-OV4
+    principle_ref: P5
+
+  - id: CAR-HC4
+    label: no_ease_based_prioritisation
+    description: >
+      Cannot prioritise research queue items by ease of research. This is
+      a soft constraint — it cannot be mechanically verified by the runner.
+      Tested adversarially in cartographer_smoke_test.yaml case CAR-ST4.
+    enforcement: smoke test adversarial case CAR-ST4
+    principle_ref: P1

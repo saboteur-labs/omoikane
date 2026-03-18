@@ -1,0 +1,383 @@
+# model.yaml
+#
+# Machine-readable specification of the persistence model.
+# Defines the file layout, SQLite index tables, reindex contract,
+# atomic write protocol, and git-friendliness constraints.
+#
+# Canonical human-readable rationale: spec/human/section6_persistence.md
+
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Architecture summary
+# ---------------------------------------------------------------------------
+
+architecture:
+  primary_store: yaml
+  secondary_store: sqlite
+  canonical_source: yaml
+  description: >
+    YAML files are the canonical source of truth. The SQLite index is built
+    from YAML and is always rebuildable. When the two disagree, YAML is
+    correct. The index exists to serve queries that would be slow as
+    full-directory YAML scans.
+
+# ---------------------------------------------------------------------------
+# Knowledge repo file layout
+# ---------------------------------------------------------------------------
+
+file_layout:
+  root_files:
+    - path: manifest.yaml
+      schema_ref: spec/machine/schema/manifest.yaml
+      description: Repo spine. One file, always present. Written exclusively by state manager.
+      gittracked: true
+
+    - path: outline.yaml
+      description: Current outline produced by Architect.
+      gittracked: true
+
+    - path: learning_brief.yaml
+      schema_ref: spec/machine/schema/manifest.yaml (learning_brief fields)
+      description: Learning brief produced at repo init.
+      gittracked: true
+
+  directories:
+    - path: documents/<node-id>/
+      contents: One YAML file per gather run. Superseded documents remain.
+      file_schema_ref: spec/machine/schema/document.yaml
+      naming_convention: "doc-<node-id>-<YYYYMMDD>-<seq>.yaml"
+      gittracked: true
+
+    - path: gaps/
+      contents: One YAML file per gap document.
+      file_schema_ref: spec/machine/schema/gap.yaml
+      naming_convention: "gap-<YYYYMMDD>-<seq>.yaml"
+      gittracked: true
+
+    - path: prompts/
+      contents: One YAML file per prompt entry (all statuses including deprecated).
+      file_schema_ref: spec/machine/schema/prompt_entry.yaml
+      naming_convention: "p-<type>-<generation>-<seq>.yaml"
+      gittracked: true
+
+    - path: reports/challenge/
+      contents: Critic challenge reports.
+      naming_convention: "critic-<YYYYMMDD>-<seq>.yaml"
+      gittracked: true
+
+    - path: reports/verification/
+      contents: Auditor verification reports.
+      naming_convention: "auditor-<YYYYMMDD>-<seq>.yaml"
+      gittracked: true
+
+    - path: reports/gaps/
+      contents: Cartographer gaps reports.
+      naming_convention: "cartographer-<YYYYMMDD>-<seq>.yaml"
+      gittracked: true
+
+    - path: reports/refinement/
+      contents: Methodologist refinement reports.
+      naming_convention: "methodologist-<YYYYMMDD>-<seq>.yaml"
+      gittracked: true
+
+    - path: .omoikane/
+      contents: Runner-internal files. Gitignored except config.yaml and smoke_tests.yaml.
+      files:
+        - path: .omoikane/config.yaml
+          description: Adapter and model selection per agent role.
+          gittracked: false
+          note: Per-researcher configuration. Not committed to the knowledge repo.
+        - path: .omoikane/omoikane.db
+          description: SQLite working index.
+          gittracked: false
+          note: Always rebuildable. Never committed.
+        - path: .omoikane/smoke_tests.yaml
+          description: Smoke test results with timestamps per role.
+          gittracked: false
+        - path: .omoikane/checkpoint_history.yaml
+          description: Resolved checkpoints. Append-only.
+          gittracked: false
+
+# ---------------------------------------------------------------------------
+# SQLite index tables
+# ---------------------------------------------------------------------------
+# These tables are built from YAML by omoikane repo reindex.
+# They store metadata and references, not full content.
+
+sqlite_tables:
+
+  - table: claims
+    description: Claim index for cross-document queries.
+    columns:
+      - name: claim_id
+        type: TEXT
+        primary_key: true
+      - name: document_id
+        type: TEXT
+        not_null: true
+      - name: outline_node_id
+        type: TEXT
+        not_null: true
+      - name: claim_type
+        type: TEXT
+        not_null: true
+      - name: source_tier
+        type: TEXT
+        not_null: true
+      - name: confidence_level
+        type: TEXT
+        not_null: true
+      - name: status
+        type: TEXT
+        not_null: true
+    used_by: [cartographer, auditor]
+
+  - table: signal_events
+    description: Signal event log for per-prompt signal counting.
+    columns:
+      - name: entry_id
+        type: TEXT
+        primary_key: true
+      - name: prompt_id
+        type: TEXT
+        not_null: true
+      - name: signal_type
+        type: TEXT
+        not_null: true
+      - name: signal_category
+        type: TEXT
+        not_null: true
+        note: "human_in_the_loop or ai_derived"
+      - name: document_id
+        type: TEXT
+        not_null: true
+      - name: event_date
+        type: TEXT
+        not_null: true
+    used_by: [signal_aggregator, methodologist]
+    indexes:
+      - columns: [prompt_id, signal_category]
+        description: Fast per-prompt signal count by category
+
+  - table: checkpoints
+    description: Open checkpoint registry.
+    columns:
+      - name: checkpoint_id
+        type: TEXT
+        primary_key: true
+      - name: checkpoint_type
+        type: TEXT
+        not_null: true
+      - name: produced_by
+        type: TEXT
+        not_null: true
+      - name: affected_object_id
+        type: TEXT
+        not_null: true
+      - name: description
+        type: TEXT
+        not_null: true
+      - name: created_at
+        type: TEXT
+        not_null: true
+      - name: principle_ref
+        type: TEXT
+        not_null: false
+    used_by: [checkpoint_registry, runner]
+    indexes:
+      - columns: [checkpoint_type]
+        description: Fast retrieval by type for omoikane review ordering
+
+  - table: documents
+    description: Document metadata index.
+    columns:
+      - name: document_id
+        type: TEXT
+        primary_key: true
+      - name: outline_node_id
+        type: TEXT
+        not_null: true
+      - name: status
+        type: TEXT
+        not_null: true
+      - name: prompt_id
+        type: TEXT
+        not_null: true
+      - name: prompt_generation
+        type: INTEGER
+        not_null: true
+      - name: adapter
+        type: TEXT
+        not_null: true
+      - name: model
+        type: TEXT
+        not_null: true
+      - name: date
+        type: TEXT
+        not_null: true
+      - name: supersedes
+        type: TEXT
+        not_null: false
+    used_by: [runner, cartographer, signal_aggregator]
+    indexes:
+      - columns: [outline_node_id, status]
+        description: Fast single-active-document-per-node check
+
+  - table: gap_documents
+    description: Gap document metadata index.
+    columns:
+      - name: gap_id
+        type: TEXT
+        primary_key: true
+      - name: nature
+        type: TEXT
+        not_null: true
+      - name: status
+        type: TEXT
+        not_null: true
+      - name: outline_node_id
+        type: TEXT
+        not_null: false
+      - name: produced_by
+        type: TEXT
+        not_null: true
+      - name: created_at
+        type: TEXT
+        not_null: true
+    used_by: [cartographer, methodologist]
+
+  - table: prompts
+    description: Prompt library metadata index.
+    columns:
+      - name: prompt_id
+        type: TEXT
+        primary_key: true
+      - name: prompt_type
+        type: TEXT
+        not_null: true
+      - name: target
+        type: TEXT
+        not_null: false
+      - name: status
+        type: TEXT
+        not_null: true
+      - name: origin
+        type: TEXT
+        not_null: true
+      - name: generation
+        type: INTEGER
+        not_null: true
+      - name: parent
+        type: TEXT
+        not_null: false
+    used_by: [methodologist, signal_aggregator]
+    indexes:
+      - columns: [prompt_type, status]
+        description: Fast retrieval of active prompts by type
+
+# ---------------------------------------------------------------------------
+# Reindex contract
+# ---------------------------------------------------------------------------
+
+reindex:
+  command: "omoikane repo reindex"
+  idempotent: true
+  safe_to_run: always
+  description: >
+    Rebuilds the SQLite index from scratch from YAML files.
+    Cannot lose data. Does not modify YAML files.
+  steps:
+    - id: REINDEX-1
+      action: Drop all existing index tables
+    - id: REINDEX-2
+      action: Read all YAML files in the knowledge repo in defined order
+      order: "manifest.yaml, outline.yaml, learning_brief.yaml, prompts/, documents/, gaps/, reports/"
+    - id: REINDEX-3
+      action: Validate ID references across files
+      on_error: log_warning_continue
+      note: Dangling references are warnings, not errors. They do not block reindex.
+    - id: REINDEX-4
+      action: Populate all index tables from validated YAML data
+    - id: REINDEX-5
+      action: Run integrity checks (single active document per node, monotonic versions)
+      on_error: log_warning_continue
+    - id: REINDEX-6
+      action: Report summary to stdout
+      fields_reported: [files_read, records_indexed, warnings_produced]
+  does_not_do:
+    - Modify any YAML file
+    - Repair invalid YAML data
+    - Block on warnings
+    - Require network access or adapter connectivity
+
+# ---------------------------------------------------------------------------
+# Atomic write protocol
+# ---------------------------------------------------------------------------
+
+atomic_write:
+  description: >
+    Multi-step state mutations use SQLite transactions and YAML temp-then-rename
+    to ensure they succeed or fail atomically.
+  steps:
+    - id: AW-1
+      action: Prepare SQLite transaction (do not commit)
+    - id: AW-2
+      action: Write YAML changes to temporary paths
+    - id: AW-3
+      action: Commit SQLite transaction
+    - id: AW-4
+      action: Rename temporary YAML files to final paths (POSIX atomic rename)
+  failure_recovery:
+    before_AW-3: >
+      Roll back transaction. Delete temp files. No visible change to repo.
+    between_AW-3_and_AW-4: >
+      SQLite is ahead of YAML. Run omoikane repo reindex to reconcile.
+      YAML is the authority — the reindex will correct the SQLite state.
+  rationale_for_sqlite_first: >
+    SQLite transaction commit is the harder atomicity guarantee. Committing
+    it first means the harder operation is done before the easier one.
+    Both orderings are recoverable via reindex; this ordering was chosen
+    because SQLite transactions provide stronger failure-mode guarantees
+    than filesystem renames across network filesystems.
+
+# ---------------------------------------------------------------------------
+# Git-friendliness constraints
+# ---------------------------------------------------------------------------
+
+git_friendliness:
+  hard_constraint: true
+  description: >
+    The persistence model must preserve git-friendliness as a hard requirement.
+    This constraint is motivated by the collaboration model (section 7) and
+    the external rendering layer.
+  requirements:
+    - All canonical data is in text files with human-readable diffs
+    - Binary files (SQLite) are gitignored and never committed
+    - YAML diffs are semantically meaningful — a claim correction produces a readable diff
+    - Merge conflicts are resolvable with standard git tooling by a developer familiar with the schema
+    - The repo can be cloned, forked, and pulled without Omoikane-specific merge tooling
+  known_limitation:
+    affected: manifest.yaml
+    description: >
+      The manifest is a single file tracking all repo state. Two researchers
+      working in parallel will produce conflicting manifest updates. Standard
+      git merge will produce a conflict that must be resolved manually.
+      Phase 4 (collaboration) addresses this with dedicated conflict resolution
+      tooling. For single-researcher use (phases 1–3) this limitation does not arise.
+
+# ---------------------------------------------------------------------------
+# External rendering contract
+# ---------------------------------------------------------------------------
+
+external_rendering:
+  reads: yaml_only
+  database_dependency: none
+  description: >
+    Any application consuming an Omoikane knowledge base reads YAML directly.
+    It has no dependency on the SQLite index or the Omoikane CLI.
+  public_interface: yaml_schema
+  versioning: >
+    Every YAML object carries a schema_version field. Consuming applications
+    use this to handle multiple schema versions. The runner's reindex command
+    is the migration tool for existing repos when the schema changes.

@@ -1,0 +1,267 @@
+# document.yaml
+#
+# Schema definition for the document block.
+# File pattern: <knowledge-repo>/documents/<outline-node-id>/<doc-id>.yaml
+#
+# A document block is the output of a single gather run. It contains
+# everything produced by the Scribe for one outline node at one point in time.
+# Documents are never deleted; superseded documents retain their file.
+#
+# Canonical human-readable rationale: spec/human/section3_schema.md §3.3
+
+schema_version: "1.0"
+object_type: document
+description: >
+  A document block is the atomic output of a single gather run. It contains
+  provenance, status, signal history, claim blocks, self-critique, and
+  optionally gap documents and follow-up prompt candidates.
+
+# ---------------------------------------------------------------------------
+# Field definitions
+# ---------------------------------------------------------------------------
+
+fields:
+  schema_version:
+    type: string
+    required: true
+    description: Schema version of this document file.
+
+  type:
+    type: string
+    required: true
+    enum: [document]
+
+  id:
+    type: string
+    required: true
+    description: Unique document ID within the repo. Format recommended but not enforced.
+
+  outline_node_id:
+    type: string
+    required: true
+    description: The outline node this document was gathered for.
+
+  supersedes:
+    type: string
+    required: false
+    description: >
+      Document ID of the document this one replaces, if any.
+      Null for the first gather on a node.
+
+  provenance:
+    type: object
+    required: true
+    fields:
+      prompt_id:
+        type: string
+        required: true
+        description: ID of the prompt from the prompt library used for this run.
+      prompt_generation:
+        type: integer
+        required: true
+        min: 1
+        description: Generation of the prompt at time of use.
+      adapter:
+        type: string
+        required: true
+        description: Adapter used (e.g. claude, openai, ollama, custom).
+      model:
+        type: string
+        required: true
+        description: Model identifier used by the adapter.
+      source_tier_mix:
+        type: object
+        required: true
+        description: Count of claims by source tier in this document.
+        fields:
+          tier_1:
+            type: integer
+            required: true
+            min: 0
+          tier_2:
+            type: integer
+            required: true
+            min: 0
+          tier_3:
+            type: integer
+            required: true
+            min: 0
+      date:
+        type: string
+        required: true
+        format: iso8601
+
+  status:
+    type: string
+    required: true
+    enum: [active, superseded, stale, low-trust]
+    description: >
+      Set by the runner. The Scribe always produces documents with 'active'.
+      Status transitions are described in section3_schema.md §3.3.
+
+  staleness_flag:
+    type: boolean
+    required: true
+    description: >
+      Set by the runner when a significant prompt revision means this document
+      was gathered under materially different instructions.
+
+  re_gather_candidate:
+    type: boolean
+    required: true
+    description: >
+      Set by the Cartographer or Critic when re-gathering is recommended
+      due to significant challenge findings or gap detection.
+
+  signal_history:
+    type: array
+    required: true
+    description: >
+      Append-only log of corrections, challenge findings, audit results,
+      and prediction checks affecting this document. Entries are never
+      modified or deleted.
+    items:
+      type: object
+      required_fields: [entry_id, type, timestamp, produced_by, description]
+      fields:
+        entry_id:
+          type: string
+          required: true
+        type:
+          type: string
+          required: true
+          enum: [claim_correction, claim_retraction, critic_finding_accepted, auditor_fail_acknowledged, prediction_checked, user_note]
+        timestamp:
+          type: string
+          required: true
+          format: iso8601
+        produced_by:
+          type: string
+          required: true
+          description: Agent role or 'researcher' that produced this entry.
+        claim_id:
+          type: string
+          required: false
+          description: Affected claim ID, if applicable.
+        description:
+          type: string
+          required: true
+          min_length: 1
+
+  claims:
+    type: array
+    required: true
+    min_items: 1
+    description: >
+      Array of claim blocks. See claim.yaml for the claim block schema.
+      Claims are embedded in the document, not stored as separate files.
+    items:
+      ref: claim.yaml
+
+  self_critique:
+    type: object
+    required: true
+    description: >
+      The Scribe's own assessment of the gather run. Not editable by the
+      researcher. Feeds the signal aggregator.
+    fields:
+      what_was_hard:
+        type: string
+        required: true
+        min_length: 1
+        description: What was difficult about this gather run.
+      confidence_floor:
+        type: string
+        required: true
+        min_length: 1
+        description: >
+          The weakest point in this document — the claim or area the Scribe
+          is least confident about.
+      unresolved_questions:
+        type: array
+        required: true
+        min_items: 1
+        description: >
+          Questions the Scribe could not resolve in this run.
+          Must contain at least one entry on every document.
+        items:
+          type: string
+          min_length: 1
+
+  gap_documents:
+    type: array
+    required: false
+    description: >
+      Gap documents produced during this gather run when ceiling detection
+      fired. These are also written as separate files under gaps/ and
+      registered in the manifest. This field retains the reference.
+    items:
+      type: object
+      required_fields: [gap_id, nature]
+      fields:
+        gap_id:
+          type: string
+          required: true
+        nature:
+          type: string
+          required: true
+          enum: [knowledge_ceiling, source_absence, contested_foundation]
+
+  follow_up_prompts:
+    type: array
+    required: false
+    description: >
+      Prompt candidate strings the Scribe surfaces as follow-up directions.
+      Not automatically added to the prompt library. Require Methodologist
+      evaluation before any action is taken.
+    items:
+      type: string
+      min_length: 1
+
+# ---------------------------------------------------------------------------
+# Validation rules
+# ---------------------------------------------------------------------------
+
+validation_rules:
+
+  - id: DOC-VR1
+    rule: source_tier_mix_matches_claims
+    description: >
+      provenance.source_tier_mix counts must equal the actual distribution
+      of source.tier values in the claims array.
+    check: >
+      source_tier_mix.tier_1 == count(claims where source.tier == tier_1)
+      source_tier_mix.tier_2 == count(claims where source.tier == tier_2)
+      source_tier_mix.tier_3 == count(claims where source.tier == tier_3)
+    violation_message: >
+      Document integrity error: source_tier_mix does not match actual claim
+      tier distribution.
+
+  - id: DOC-VR2
+    rule: claim_ids_unique
+    description: All claim IDs within a document must be unique.
+    check: "len(claim ids) == len(unique claim ids)"
+    violation_message: >
+      Document integrity error: duplicate claim id found.
+
+  - id: DOC-VR3
+    rule: signal_history_append_only
+    description: >
+      Signal history entries must not be removed or modified. Enforced by
+      the runner's state manager — no write path should ever delete or
+      mutate a signal history entry.
+    check: >
+      At each write: existing signal_history entries are unchanged and
+      new entries are only appended.
+    violation_message: >
+      Runner error: attempted to modify or remove a signal history entry.
+
+# ---------------------------------------------------------------------------
+# Invariants
+# ---------------------------------------------------------------------------
+
+invariants:
+  - Documents are never deleted from the repo filesystem.
+  - The Scribe always creates documents with status 'active'.
+  - signal_history is strictly append-only.
+  - claims array min_items 1 — a document with no claims is invalid.

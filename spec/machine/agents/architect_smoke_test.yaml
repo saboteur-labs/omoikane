@@ -1,0 +1,120 @@
+# architect_smoke_test.yaml
+#
+# Smoke test definitions for the Architect role.
+# See spec/human/section2_agent_design.md §2.4 for the smoke test framework.
+#
+# Run via: omoikane agent test architect
+# Results stored in: .omoikane/smoke_tests.yaml (per knowledge repo)
+
+schema_version: "1.0"
+role: architect
+description: >
+  Verifies connectivity, structural compliance, output validation rule
+  satisfaction, and minimally acceptable epistemic constitution behaviour
+  for the Architect role. The adversarial case targets the Architect's
+  most likely failure mode: producing a learning brief or outline without
+  sufficient clarification, or producing an outline with no contested nodes
+  and no justification.
+
+cases:
+
+  - id: ARC-ST1
+    label: connectivity
+    type: connectivity
+    description: >
+      Verify the configured adapter can reach the model and receive a response.
+    input:
+      prompt: "Respond with the single word: ready"
+    pass_conditions:
+      - adapter returns a non-empty response within timeout
+      - no authentication or network error
+
+  - id: ARC-ST2
+    label: structural_compliance_init
+    type: structural_compliance
+    description: >
+      Verify the Architect returns a structurally valid learning_brief when
+      given a minimal init prompt with pre-supplied answers to its questions.
+    input:
+      command: init
+      prompt: >
+        The researcher wants to study Byzantine fault tolerance in distributed
+        systems. They have some prior knowledge of distributed systems but are
+        new to formal fault tolerance proofs. They want to focus on practical
+        consensus algorithms. Use the following provided answers for your
+        clarifying questions: goal is to understand how consensus is achieved
+        when nodes may behave arbitrarily, definition of done is a document
+        that explains PBFT and its key assumptions clearly.
+    pass_conditions:
+      - output parses as valid YAML
+      - output.type == "learning_brief"
+      - all required fields present (subject, goal, prior_knowledge, priority_angles, definition_of_done, questions_asked)
+      - output.questions_asked is an array with at least one entry
+      - output.priority_angles is an array with at least one entry
+
+  - id: ARC-ST3
+    label: structural_compliance_outline
+    type: structural_compliance
+    description: >
+      Verify the Architect returns a structurally valid outline given a
+      synthetic learning brief.
+    input:
+      command: outline
+      learning_brief:
+        type: learning_brief
+        subject: "Byzantine fault tolerance in distributed systems"
+        goal: "Understand how consensus is achieved when nodes may behave arbitrarily"
+        prior_knowledge: "Basic distributed systems; no prior fault tolerance theory"
+        priority_angles:
+          - Practical consensus algorithms (PBFT)
+          - Assumptions and failure models
+        definition_of_done: "Clear explanation of PBFT and its key assumptions"
+    pass_conditions:
+      - output parses as valid YAML
+      - output.type == "outline"
+      - output.version >= 1
+      - output.nodes is a non-empty array
+      - every node has fields id, type, title, description, parent_id, status
+      - every node.type is in [factual, contested, definitional, methodological, edge_case, gap_placeholder]
+      - every node.status == "draft"
+      - all node ids are unique
+      - output.contested_or_edge_case_node_count is present
+
+  - id: ARC-ST4
+    label: output_validation_contested_nodes
+    type: output_validation
+    description: >
+      Verify that when the Architect produces an outline with no contested
+      or edge-case nodes, it provides a justification. Uses a deliberately
+      narrow synthetic research scope to make a no-contested-nodes outcome
+      plausible.
+    input:
+      command: outline
+      learning_brief:
+        type: learning_brief
+        subject: "The year the Eiffel Tower was built"
+        goal: "Confirm the construction date and primary architect"
+        prior_knowledge: "None"
+        priority_angles:
+          - Construction date
+          - Primary architect
+        definition_of_done: "Two confirmed facts with citations"
+    pass_conditions:
+      - "if output.contested_or_edge_case_node_count == 0: output.justification_if_no_contested_nodes is present and non-empty"
+      - output_validation rule ARC-OV2 passes
+
+  - id: ARC-ST5
+    label: adversarial_no_clarification
+    type: epistemic_constitution
+    description: >
+      Adversarial case. Provide a vague init prompt and verify the Architect
+      asks clarifying questions rather than immediately producing a learning
+      brief. This targets the most likely failure mode: skipping clarification
+      to appear responsive.
+    input:
+      command: init
+      prompt: "I want to learn about machine learning."
+    pass_conditions:
+      - output.questions_asked is present and non-empty (at least one question asked)
+      - output does not contain a complete learning_brief with no questions_asked or an empty questions_asked array
+      - "if output.type == learning_brief: output.questions_asked has at least one entry"

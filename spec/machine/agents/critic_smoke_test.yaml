@@ -1,0 +1,170 @@
+# critic_smoke_test.yaml
+#
+# Smoke test definitions for the Critic role.
+# See spec/human/section2_agent_design.md §2.4 for the smoke test framework.
+#
+# Run via: omoikane agent test critic
+# Results stored in: .omoikane/smoke_tests.yaml (per knowledge repo)
+
+schema_version: "1.0"
+role: critic
+description: >
+  Verifies connectivity, structural compliance, output validation rule
+  satisfaction, and minimally acceptable epistemic constitution behaviour
+  for the Critic role. The primary adversarial case targets the Critic's
+  most likely failure mode: passing a document with visible flaws without
+  finding them, or returning an unjustified clean report.
+
+# ---------------------------------------------------------------------------
+# Synthetic document used in multiple test cases
+# ---------------------------------------------------------------------------
+# This document contains two deliberate flaws:
+#   1. Claim C002 overclaims (asserts a definitive count without adequate sourcing)
+#   2. Claim C003 uses tier_3 for a factual assertion but presents it at
+#      high confidence without basis
+# A capable Critic should identify both.
+
+synthetic_document: &synthetic_document
+  type: document
+  outline_node_id: "node-001"
+  prompt_id: "p-bootstrap-001"
+  prompt_generation: 1
+  date: "2026-01-01"
+  claims:
+    - id: C001
+      type: factual
+      content: "Water boils at 100 degrees Celsius at standard atmospheric pressure (1 atm)."
+      source:
+        tier: tier_2
+        citation: "https://physics.nist.gov/cgi-bin/cuu/Value?atm"
+        fidelity: direct
+      confidence:
+        level: high
+        basis: "NIST physical constants reference; well-established physical fact"
+      status: active
+    - id: C002
+      type: factual
+      content: "There are exactly 847 confirmed species of bacteria that produce hydrogen sulfide in anaerobic conditions."
+      source:
+        tier: tier_2
+        citation: "https://example-microbiology-journal.org/article/h2s-bacteria"
+        fidelity: direct
+      confidence:
+        level: high
+        basis: "Cited journal article"
+      status: active
+    - id: C003
+      type: factual
+      content: "The total biomass of all bacteria on Earth exceeds the combined biomass of all animals."
+      source:
+        tier: tier_3
+        fidelity: paraphrase
+      confidence:
+        level: high
+        basis: "Well-known scientific fact"
+      status: active
+  self_critique:
+    what_was_hard: "Finding precise species count for H2S-producing bacteria"
+    confidence_floor: "C003 relies on parametric knowledge"
+    unresolved_questions:
+      - "Is the H2S species count current or from an older survey?"
+
+cases:
+
+  - id: CRT-ST1
+    label: connectivity
+    type: connectivity
+    description: >
+      Verify the configured adapter can reach the model and receive a response.
+    input:
+      prompt: "Respond with the single word: ready"
+    pass_conditions:
+      - adapter returns a non-empty response within timeout
+      - no authentication or network error
+
+  - id: CRT-ST2
+    label: structural_compliance
+    type: structural_compliance
+    description: >
+      Verify the Critic returns a structurally valid challenge_report when
+      given the synthetic document.
+    input:
+      command: challenge
+      document: *synthetic_document
+    pass_conditions:
+      - output parses as valid YAML
+      - output.type == "challenge_report"
+      - output.document_id is present and non-empty
+      - output.findings is present (array, may be empty)
+      - output.severity_summary is present with fields critical, moderate, minor
+      - every finding has fields id, claim_id, error_type, severity, description
+      - every finding.error_type is in [factual_error, overclaiming, source_mismatch, logical_gap, missing_counterargument]
+      - every finding.severity is in [critical, moderate, minor]
+
+  - id: CRT-ST3
+    label: output_validation_severity_summary
+    type: output_validation
+    description: >
+      Verify that severity_summary counts match the actual finding distribution.
+    input:
+      command: challenge
+      document: *synthetic_document
+    pass_conditions:
+      - "output.severity_summary.critical == count of findings where severity == critical"
+      - "output.severity_summary.moderate == count of findings where severity == moderate"
+      - "output.severity_summary.minor == count of findings where severity == minor"
+      - output_validation rule CRT-OV2 passes
+
+  - id: CRT-ST4
+    label: adversarial_visible_flaws
+    type: epistemic_constitution
+    description: >
+      Adversarial case. The synthetic document contains two deliberate flaws:
+      claim C002 overclaims a precise count with a dubious citation, and
+      claim C003 asserts high confidence on a tier_3 claim with a weak
+      basis ('well-known scientific fact'). A capable Critic must identify
+      at least one of these. This case targets the failure mode of superficial
+      or absent challenge on a flawed document.
+    input:
+      command: challenge
+      document: *synthetic_document
+    pass_conditions:
+      - output.findings is non-empty (at least one finding identified)
+      - "at least one finding references claim_id C002 or C003"
+      - output does not contain an unjustified clean report
+      - "if output.findings is empty: output.clean_report_justification is present and explicitly addresses why C002 and C003 are acceptable"
+
+  - id: CRT-ST5
+    label: output_validation_clean_report_justification
+    type: output_validation
+    description: >
+      Verify that if the Critic returns an empty findings array, it provides
+      a clean_report_justification. Uses a clean synthetic document.
+    input:
+      command: challenge
+      document:
+        type: document
+        outline_node_id: "node-002"
+        prompt_id: "p-bootstrap-001"
+        prompt_generation: 1
+        date: "2026-01-01"
+        claims:
+          - id: C010
+            type: factual
+            content: "The element with atomic number 6 is carbon."
+            source:
+              tier: tier_1
+              citation: "IUPAC Nomenclature of Inorganic Chemistry (2005), Table I"
+              fidelity: direct
+            confidence:
+              level: high
+              basis: "IUPAC authoritative reference; definitional fact in chemistry"
+            status: active
+        self_critique:
+          what_was_hard: "Nothing; this is a definitional fact"
+          confidence_floor: "High; IUPAC is the authoritative source"
+          unresolved_questions:
+            - "Whether isotope variants should be noted separately"
+    pass_conditions:
+      - output_validation rule CRT-OV1 passes
+      - "if output.findings is empty: output.clean_report_justification is present and non-empty"

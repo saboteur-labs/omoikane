@@ -1,0 +1,194 @@
+# principles.yaml
+#
+# The five operational principles of Omoikane.
+#
+# These are structurally binding principles. Each maps to specific runner
+# behaviours, schema requirements, or agent constraints. The runner references
+# principles by ID when logging constraint violations, checkpoint creations,
+# and validation failures so the user can trace a system decision back to
+# its governing principle.
+#
+# Canonical human-readable rationale: spec/human/section1_philosophy.md §1.5
+
+schema_version: "1.0"
+
+principles:
+
+  - id: P1
+    name: uncertainty_is_a_finding
+    summary: Uncertainty is a finding, not a failure. Name gaps explicitly.
+    full_statement: >
+      Gaps must be named explicitly and produced as first-class outputs.
+      The system produces a gap document whenever the evidence does not
+      justify a factual claim. Gap documents are produced to the same
+      standard as any other document. The system does not produce content
+      to fill a gap when a gap document is the correct output.
+    structural_consequences:
+      - "Gap documents are first-class schema objects with a defined type field: knowledge_ceiling | source_absence | contested_foundation"
+      - The Scribe must surface at least one unresolved question per document
+      - The Scribe cannot produce a document with no gaps without explicit justification in the self_critique field
+      - The Cartographer's primary output type is gap analysis
+    violation_log_message: >
+      Principle P1 violated: output contains no gap finding where evidence
+      is insufficient to support a factual claim.
+    referenced_by:
+      - "schema: spec/machine/schema/gap.yaml"
+      - "agent: spec/machine/agents/scribe.yaml"
+      - "agent: spec/machine/agents/cartographer.yaml"
+
+  - id: P2
+    name: every_claim_has_a_source
+    summary: Every claim must know where it came from.
+    full_statement: >
+      Source tier, fidelity, and confidence are required fields on every
+      factual claim. A claim missing any of these three fields is structurally
+      invalid. The runner rejects it without delivering the output to the user.
+    structural_consequences:
+      - "Claim schema requires: source.tier, source.fidelity, confidence.level"
+      - Runner output validation rejects any claim block missing these fields
+      - "Source tiers are an enumeration: tier_1 | tier_2 | tier_3"
+      - "Fidelity levels are an enumeration: direct | paraphrase | inferred"
+      - "Confidence levels are an enumeration: high | medium | low | contested"
+    violation_log_message: >
+      Principle P2 violated: claim block is missing one or more required
+      provenance fields (source.tier, source.fidelity, confidence.level).
+    referenced_by:
+      - "schema: spec/machine/schema/claim.yaml"
+      - "agent: spec/machine/agents/scribe.yaml"
+      - "runner: output_validation_layer"
+
+    # Source tier definitions — canonical reference for all other spec files
+    source_tiers:
+      - id: tier_1
+        description: User-provided sources
+        trust: highest
+        citation: always_explicit
+      - id: tier_2
+        description: AI-retrieved via web search
+        trust: medium
+        citation: cited_and_flagged_as_ai_retrieved
+      - id: tier_3
+        description: Model parametric knowledge
+        trust: lowest
+        citation: always_flagged_no_external_source
+        flag_required: true
+
+    # Fidelity level definitions — canonical reference for all other spec files
+    fidelity_levels:
+      - id: direct
+        description: >
+          Claim closely mirrors source language. The source text and the
+          claim use substantially the same words to express the same assertion.
+      - id: paraphrase
+        description: >
+          Meaning preserved, words changed. The claim expresses the same
+          assertion as the source but in different language.
+      - id: inferred
+        description: >
+          Claim follows logically from source but is not explicitly stated.
+          The source supports the claim but does not assert it directly.
+        note: >
+          Inferred claims carry a distinct epistemic status even when the
+          source is reliable. The fidelity field makes this visible without
+          requiring the researcher to re-read the source.
+
+    # Confidence level definitions — canonical reference for all other spec files
+    confidence_levels:
+      - id: high
+        description: Strong evidence from multiple reliable sources
+      - id: medium
+        description: Adequate evidence from at least one reliable source
+      - id: low
+        description: Weak or limited evidence; single source or uncertain source
+      - id: contested
+        description: >
+          Genuine expert disagreement. Distinct from low confidence: the
+          evidence is not weak, the field is divided. The system surfaces
+          this rather than resolving it.
+
+  - id: P3
+    name: system_argues_against_itself
+    summary: >
+      The system must be able to argue against itself. Gather and validation
+      are structurally separated.
+    full_statement: >
+      Gathering and validation are performed by separate agents with no shared
+      context. The Critic challenges documents without reading the Scribe's
+      self-critique. The Auditor verifies sources without reading the Critic's
+      challenge report. No agent reads another agent's intermediate output
+      when performing its own role. This produces genuine adversarial review,
+      not self-confirmation.
+    structural_consequences:
+      - Each agent has an explicit context_budget with required, optional, and forbidden lists
+      - The runner enforces forbidden lists — it does not pass forbidden context to the agent regardless of what is available in the repo
+      - "The Scribe's forbidden list includes: other documents, challenge reports, the prompt library"
+      - "The Critic's forbidden list includes: other documents, the Scribe's self_critique, source materials"
+      - Context budget violations are a runner configuration error, not a model error
+    violation_log_message: >
+      Principle P3 violated: agent was passed context listed in its
+      forbidden list.
+    referenced_by:
+      - "agent: spec/machine/agents/scribe.yaml (context_budget.forbidden)"
+      - "agent: spec/machine/agents/critic.yaml (context_budget.forbidden)"
+      - "agent: spec/machine/agents/auditor.yaml (context_budget.forbidden)"
+      - "runner: context_budget_enforcement"
+
+  - id: P4
+    name: methodology_improves_alongside_content
+    summary: The methodology improves alongside the content.
+    full_statement: >
+      The prompt library is a living artifact. Prompts are structured objects
+      with lineage, rationale, and testable predictions. The Methodologist
+      refines the library based on accumulated signal. Refinement requires
+      at least two independent signals before generating any candidate.
+      AI-derived signals can generate candidates but cannot promote them.
+      Promotion requires at least one human-in-the-loop signal.
+    structural_consequences:
+      - "Prompt entries are schema objects with fields: id, type, target, status, origin, generation, parent, question, rationale, performance, prediction"
+      - "The Methodologist hard constraint: minimum two independent signals before generating any candidate"
+      - "The Methodologist hard constraint: AI-derived signals alone cannot promote a candidate"
+      - Rejected candidates are archived with rejection reason, not deleted
+      - Each prompt records its parent — lineage is preserved
+    violation_log_message: >
+      Principle P4 violated: prompt candidate generated or promoted without
+      meeting the minimum signal threshold.
+    referenced_by:
+      - "schema: spec/machine/schema/prompt_entry.yaml"
+      - "agent: spec/machine/agents/methodologist.yaml"
+      - "runner: signal_aggregator"
+
+  - id: P5
+    name: human_in_the_loop
+    summary: >
+      The human is always in the loop on judgment calls. Agents surface.
+      Humans decide.
+    full_statement: >
+      No agent output silently changes repo state. Every output that requires
+      a judgment call surfaces as a checkpoint. The researcher is not a
+      reviewer of Omoikane's conclusions — they are the agent making the
+      conclusions, supported by structured tools. Agents surface findings.
+      Humans decide what to do with them.
+    structural_consequences:
+      - Every agent write operation has a defined checkpoint type
+      - "Checkpoint types: inform | review | block"
+      - Block checkpoints prevent repo progress on the affected node until the researcher acts
+      - The runner does not resolve conflicts automatically
+      - Prompt promotion always requires a human action
+      - No agent output that the researcher has not reviewed can advance a document to verified status
+    checkpoint_types:
+      - id: inform
+        description: Logged and visible. No action required.
+        blocks_progress: false
+      - id: review
+        description: Surfaces for user attention via omoikane review. Non-blocking.
+        blocks_progress: false
+      - id: block
+        description: Repo cannot proceed on this node until researcher acts.
+        blocks_progress: true
+    violation_log_message: >
+      Principle P5 violated: repo state changed without producing a
+      checkpoint for the affected output.
+    referenced_by:
+      - "schema: spec/machine/cli/checkpoints.yaml"
+      - "runner: checkpoint_registry"
+      - "cli: omoikane review, omoikane resolve"

@@ -1,0 +1,379 @@
+# lifecycle.yaml
+#
+# Operational rules for the prompt library lifecycle.
+# Governs signal collection, the two-signal threshold, promotion requirements,
+# ceiling detection, prediction checking, and staleness flagging.
+#
+# This file is consumed by the runner's signal aggregator and state manager.
+# It does not define the prompt entry schema — see spec/machine/schema/prompt_entry.yaml.
+# It does not define the Methodologist's output constraints — see spec/machine/agents/methodologist.yaml.
+# It defines the library-level rules that the runner enforces independently of agents.
+#
+# Canonical human-readable rationale: spec/human/section4_prompt_library.md
+
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Signal type definitions
+# ---------------------------------------------------------------------------
+# The runner recognises these signal types and routes them through the
+# signal aggregator. Each signal is recorded in the document's signal_history
+# and counted toward the two-signal threshold per prompt.
+
+signal_types:
+
+  - id: user_correction
+    label: User correction
+    source: researcher
+    category: human_in_the_loop
+    trigger: "omoikane claim correct <claim-id>"
+    description: >
+      The researcher corrected the content of a claim in a document gathered
+      by this prompt. Indicates the prompt produced a claim that needed
+      substantive correction.
+    counts_toward_threshold: true
+
+  - id: challenge_acceptance
+    label: Challenge acceptance
+    source: researcher
+    category: human_in_the_loop
+    trigger: "omoikane resolve <checkpoint-id> --action accept"
+    description: >
+      The researcher accepted a Critic finding against a document gathered
+      by this prompt. Indicates the prompt produced content that a trained
+      adversarial reviewer found genuinely problematic.
+    counts_toward_threshold: true
+
+  - id: user_rating
+    label: User rating
+    source: researcher
+    category: human_in_the_loop
+    trigger: "omoikane prompt rate <prompt-id> --score <0-5>"
+    description: >
+      The researcher assigned an explicit quality rating to a document
+      produced by this prompt.
+    counts_toward_threshold: true
+
+  - id: confidence_delta
+    label: Confidence delta
+    source: runner
+    category: ai_derived
+    trigger: automatic after each gather run
+    description: >
+      Runner-computed change in document confidence level relative to the
+      repo baseline for this outline node. Positive means above-average
+      confidence; negative means below-average.
+    counts_toward_threshold: true
+    note: >
+      AI-derived. Can contribute to the two-signal threshold for candidate
+      generation but cannot satisfy the human_in_the_loop requirement for
+      promotion.
+
+  - id: self_critique
+    label: Scribe self-critique
+    source: scribe
+    category: ai_derived
+    trigger: automatic after each gather run
+    description: >
+      Signal derived from the Scribe's self_critique fields: unresolved
+      questions, confidence floor, and what_was_hard. Aggregated by the
+      runner into a quality indicator for the prompt.
+    counts_toward_threshold: true
+    note: >
+      AI-derived. Same promotion restriction as confidence_delta.
+
+# ---------------------------------------------------------------------------
+# Two-signal threshold rules
+# ---------------------------------------------------------------------------
+
+signal_threshold:
+  minimum_independent_signals: 2
+  description: >
+    The Methodologist must have at least 2 independent signals before
+    generating any candidate. "Independent" means from distinct events —
+    multiple AI-derived signals from the same gather run count as one event.
+  independence_rule: >
+    Two signals are independent if they originate from different gather runs
+    or different signal types. All signals from a single gather run count
+    as one independent signal event, regardless of how many signal types fire.
+  promotion_human_signal_required: true
+  promotion_rule: >
+    Before a candidate can be promoted to active, at least one signal in
+    the candidate's motivating signal set must be of category human_in_the_loop.
+    A candidate backed exclusively by ai_derived signals cannot be promoted.
+    The runner enforces this on the omoikane prompt promote command.
+
+# ---------------------------------------------------------------------------
+# Promotion rules
+# ---------------------------------------------------------------------------
+# Enforced by the runner's state manager on omoikane prompt promote.
+
+promotion_rules:
+
+  - id: PROM-R1
+    rule: human_signal_required
+    description: >
+      At least one human_in_the_loop signal must be present in the
+      candidate's motivating signal set before promotion is permitted.
+    check: >
+      count(signals where category == human_in_the_loop) >= 1
+    on_failure: block
+    violation_message: >
+      Promotion blocked: no human-in-the-loop signal found for this
+      candidate. At least one user_correction, challenge_acceptance, or
+      user_rating is required before promotion.
+
+  - id: PROM-R2
+    rule: candidate_status_required
+    description: >
+      Only prompts with status 'candidate' can be promoted. Active and
+      deprecated prompts cannot be promoted.
+    check: "candidate.status == candidate"
+    on_failure: block
+
+  - id: PROM-R3
+    rule: replacement_creates_deprecation
+    description: >
+      Promoting a candidate must deprecate the current active prompt in
+      the same lineage (same prompt_type and target). The runner performs
+      this atomically — promotion and deprecation happen together or
+      neither happens.
+    on_failure: block
+    violation_message: >
+      Promotion blocked: could not identify the active prompt to deprecate.
+      Verify the candidate has a valid parent_id.
+
+  - id: PROM-R4
+    rule: deprecation_reason_required
+    description: >
+      When the runner deprecates the previous active prompt as part of a
+      promotion, it must record a deprecation_reason in that prompt's entry.
+      The reason is auto-generated as "superseded by <new-prompt-id>".
+    on_failure: block
+
+# ---------------------------------------------------------------------------
+# Rejection rules
+# ---------------------------------------------------------------------------
+# Enforced by the runner's state manager on omoikane prompt reject.
+
+rejection_rules:
+
+  - id: REJ-R1
+    rule: rejected_candidate_becomes_deprecated
+    description: >
+      A rejected candidate transitions to 'deprecated' (not deleted).
+      The researcher must provide a rejection reason; the runner prompts
+      for it interactively or accepts it via --reason flag.
+    rejection_reason_required: true
+
+  - id: REJ-R2
+    rule: rejection_reason_preserved
+    description: >
+      The rejection reason is written to the prompt entry's deprecation_reason
+      field and is never modified or deleted.
+
+# ---------------------------------------------------------------------------
+# Ceiling detection rules
+# ---------------------------------------------------------------------------
+
+ceiling_detection:
+  required_before_candidate_generation: true
+  description: >
+    Before generating any candidate, the Methodologist must assess whether
+    the underperformance of the current prompt reflects a framing failure
+    (addressable with a better prompt) or a knowledge ceiling (not addressable
+    with any prompt). If a ceiling is detected, the output is a gap document
+    reference, not a candidate.
+  ceiling_indicators:
+    - Same question attempted in 3 or more gather runs with no tier-1 or tier-2 sources produced
+    - Multiple independent prompt framings for the same node all fail to produce high-confidence claims
+    - Scribe self-critique consistently names the same unresolved question across runs
+  enforcement: methodologist.yaml output_validation rule MET-OV1
+  ceiling_output: >
+    When a ceiling is detected, the Methodologist records the gap document ID
+    in ceiling_gaps in the refinement report. No candidate is generated for
+    that topic. The runner creates a 'review' checkpoint surfacing the ceiling
+    finding to the researcher.
+
+# ---------------------------------------------------------------------------
+# Prediction checking protocol
+# ---------------------------------------------------------------------------
+
+prediction_checking:
+  required_before_candidate_generation: true
+  description: >
+    Before generating new candidates, the Methodologist must review the
+    outcome of prior predictions. Predictions that are consistently refuted
+    indicate that the rationale generating them is unreliable.
+  protocol:
+    - "For each active or recently deprecated prompt with a prediction: check whether the prediction outcome has been recorded"
+    - "If the prediction outcome is 'pending' and sufficient gather runs have occurred: assess outcome and record as confirmed or refuted"
+    - "If a prompt's prediction has been refuted: flag the prompt for possible demotion in the next refinement report"
+  enforcement: methodologist.yaml output_validation rule MET-OV2
+  demotion_trigger: >
+    A prompt whose prediction is refuted is not automatically deprecated.
+    The Methodologist flags it in the refinement report as a demotion
+    candidate. The researcher decides whether to demote via omoikane resolve.
+
+# ---------------------------------------------------------------------------
+# Staleness flagging rules
+# ---------------------------------------------------------------------------
+
+staleness_flagging:
+  description: >
+    When a candidate prompt is promoted to active, the runner assesses
+    whether existing documents on the same outline node are now stale
+    relative to the new prompt's framing.
+  trigger_conditions:
+    - id: STALE-T1
+      condition: significant_directional_change
+      description: >
+        The Methodologist flagged the candidate as a significant directional
+        change in the refinement report. The runner sets staleness_flag on
+        all active documents for the same target node.
+    - id: STALE-T2
+      condition: generation_jump
+      description: >
+        The promoted candidate's generation is more than 2 ahead of the
+        parent it supersedes (non-incremental jump). The runner sets
+        staleness_flag as a precaution.
+  staleness_action: >
+    When staleness_flag is set on a document, the runner creates a 'review'
+    checkpoint noting that the document was gathered under materially different
+    prompt instructions. The researcher decides whether to re-gather.
+  staleness_does_not_block: true
+  note: >
+    A stale document is not invalid — its content may still be correct.
+    The flag is a signal to the researcher that the document's methodology
+    is now out of date relative to the current prompt. Re-gathering is the
+    researcher's choice.
+
+# ---------------------------------------------------------------------------
+# Lineage health rules
+# ---------------------------------------------------------------------------
+
+lineage_health:
+  description: >
+    Rules governing when the Cartographer or Methodologist should flag
+    a lineage for meta-refine review.
+  meta_refine_indicators:
+    - id: LH-1
+      condition: long_lineage_without_confirmed_predictions
+      description: >
+        A lineage has reached generation 5 or more without any prediction
+        confirmed as correct. This suggests the refinement process is not
+        generating verifiable hypotheses.
+      action: >
+        The Cartographer surfaces this as a review checkpoint. The
+        Methodologist may fork from an earlier ancestor in the next
+        refine run.
+    - id: LH-2
+      condition: consistent_prediction_refutation
+      description: >
+        Three or more consecutive predictions in a lineage have been refuted.
+        This suggests the rationale model for this lineage is systematically
+        wrong.
+      action: >
+        The Methodologist is expected to consider forking from an earlier
+        ancestor rather than extending the current tip further.
+  lineage_generation_threshold: 5
+  consecutive_refutation_threshold: 3
+  configurable: true
+  config_location: .omoikane/config.yaml
+  config_keys:
+    lineage_generation_threshold: methodology.lineage_generation_threshold
+    consecutive_refutation_threshold: methodology.consecutive_refutation_threshold
+  config_example: |
+    methodology:
+      lineage_generation_threshold: 7
+      consecutive_refutation_threshold: 4
+  config_validation: >
+    Both values must be positive integers >= 1. The runner rejects values
+    below 1 and falls back to the defaults above, logging a warning.
+  rationale: >
+    These thresholds are not empirically validated. Making them configurable
+    per knowledge repo allows researchers to tune based on actual signal
+    accumulation rates without code changes. The values above are the
+    defaults when no config override is present. See phases.yaml OQ1.
+
+# ---------------------------------------------------------------------------
+# Confidence delta baseline definition
+# ---------------------------------------------------------------------------
+# Resolution of OQ5. Defines the precise baseline used when computing
+# confidence_delta for the signal aggregator.
+
+confidence_delta:
+  baseline: repo_wide_mean
+  description: >
+    confidence_delta is the document's mean claim confidence minus the
+    repo-wide baseline. Positive means the document is more confident than
+    the repo average; negative means less confident.
+  baseline_definition: >
+    The repo-wide mean confidence of all active claims across all active
+    documents, computed at the time of the gather run. A single number
+    for the whole repo — not scoped by node type or prompt.
+  rationale: >
+    A repo-wide mean recovers quickly from cold start (meaningful after
+    a few gather runs), is non-circular (not measured against itself),
+    and is computable in one SQL query against the claims table. Node-type-
+    scoped baselines are a potential future refinement once real repos
+    provide data on whether cross-type comparisons cause distortion,
+    but are not the initial design. See phases.yaml OQ5.
+  confidence_numeric_mapping:
+    high: 1.0
+    medium: 0.67
+    low: 0.33
+    contested: 0.50
+    note: >
+      Contested claims are mapped to 0.50 (midpoint) because contestation
+      signals genuine uncertainty rather than low confidence in a single
+      direction. This is a convention; it is not an empirical measurement.
+  computation:
+    step_1: >
+      Map each active claim's confidence.level to its numeric value above.
+    step_2: >
+      Compute the repo baseline: mean of all active claim numeric values
+      across all active documents. Raw claim values are averaged directly
+      (not per-document means averaged) to avoid weighting short documents
+      equally with long ones.
+    step_3: >
+      Compute the document mean: mean of numeric values for claims in
+      this document only.
+    step_4: "confidence_delta = document_mean - repo_baseline"
+  edge_cases:
+    - condition: No active claims exist yet (first gather run)
+      action: >
+        confidence_delta is null. Not recorded as a signal event. The
+        baseline requires at least one prior active document.
+    - condition: Document has no claims
+      action: >
+        Should not occur — SCR-OV1 requires at least one claim. If it
+        does occur, confidence_delta is null and a runner warning is logged.
+  recorded_in: >
+    signal_history entry of type confidence_delta. The numeric delta value
+    is stored alongside the standard signal_history fields as delta_value.
+  used_by: [signal_aggregator, methodologist]
+
+# ---------------------------------------------------------------------------
+# Bootstrap prompt specification
+# ---------------------------------------------------------------------------
+
+bootstrap:
+  description: >
+    Bootstrap prompts are created by the runner at omoikane repo init.
+    They are generation-1, origin: system, status: active.
+  content_principles:
+    - Bootstrap prompts are deliberately minimal. They identify the task
+      and reference the epistemic constitution but do not encode
+      domain-specific framing.
+    - They do not carry a prediction field (optional for system prompts).
+    - They are the explicit starting point for library evolution, not
+      the intended endpoint.
+  created_for_commands:
+    - init
+    - outline
+    - gather
+    - challenge
+    - verify
+    - gaps
+    - refine

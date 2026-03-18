@@ -1,0 +1,250 @@
+# architect.yaml
+#
+# Agent definition for the Architect role.
+# Canonical human-readable rationale: spec/human/section2_agent_design.md §2.2.1
+
+schema_version: "1.0"
+role: architect
+phase: 1
+commands:
+  - init
+  - outline
+stance: >
+  Inquisitive and structured. Asks before it builds. The Architect does not
+  produce content until it has established what the researcher needs, knows,
+  and has excluded. Structured output is a constraint, not a style preference.
+capability_tier: high
+epistemic_constitution_ref: spec/machine/philosophy/epistemic_constitution.yaml
+
+# ---------------------------------------------------------------------------
+# Context budget
+# ---------------------------------------------------------------------------
+
+context_budget:
+  required:
+    - learning_brief         # for outline command only; not available during init
+  optional:
+    - existing_outline       # when revising an approved outline
+    - repo_manifest          # for outline command — to check existing node status
+  forbidden:
+    - document_files         # Architect must not read gathered content
+    - challenge_reports      # Architect must not see validation outputs
+    - verification_reports
+    - gaps_reports
+    - prompt_library         # Architect sees only its assigned system prompt
+
+# ---------------------------------------------------------------------------
+# Output schema
+# ---------------------------------------------------------------------------
+# Defines the required structure of each command's output.
+# The runner validates all agent outputs against this schema before accepting.
+
+output_schema:
+
+  init:
+    root_type: learning_brief
+    required_fields:
+      - type
+      - subject
+      - goal
+      - prior_knowledge
+      - priority_angles
+      - definition_of_done
+      - questions_asked
+    properties:
+      type:
+        type: string
+        enum: [learning_brief]
+      subject:
+        type: string
+        min_length: 1
+      goal:
+        type: string
+        min_length: 1
+      prior_knowledge:
+        type: string
+        min_length: 1
+        note: "Value 'none' is acceptable; an empty string is not"
+      priority_angles:
+        type: array
+        min_items: 1
+        items:
+          type: string
+          min_length: 1
+      exclusions:
+        type: array
+        required: false
+        items:
+          type: string
+      definition_of_done:
+        type: string
+        min_length: 1
+      questions_asked:
+        type: array
+        min_items: 1
+        items:
+          type: object
+          required_fields: [question, answer]
+          properties:
+            question:
+              type: string
+              min_length: 1
+            answer:
+              type: string
+              min_length: 1
+
+  outline:
+    root_type: outline
+    required_fields:
+      - type
+      - version
+      - nodes
+      - contested_or_edge_case_node_count
+    properties:
+      type:
+        type: string
+        enum: [outline]
+      version:
+        type: integer
+        min: 1
+      nodes:
+        type: array
+        min_items: 1
+        items:
+          type: object
+          required_fields: [id, type, title, description, parent_id, status]
+          properties:
+            id:
+              type: string
+              min_length: 1
+            type:
+              type: string
+              enum: [factual, contested, definitional, methodological, edge_case, gap_placeholder]
+            title:
+              type: string
+              min_length: 1
+            description:
+              type: string
+              min_length: 1
+            parent_id:
+              type: string
+              nullable: true
+            status:
+              type: string
+              enum: [draft]
+      contested_or_edge_case_node_count:
+        type: integer
+        min: 0
+      justification_if_no_contested_nodes:
+        type: string
+        required: false
+        note: >
+          Required when contested_or_edge_case_node_count is 0.
+          See output_validation rule ARC-OV2.
+
+# ---------------------------------------------------------------------------
+# Output validation rules
+# ---------------------------------------------------------------------------
+# Rules the runner checks after parsing the output against output_schema.
+# These enforce hard constraints that cannot be expressed as schema types alone.
+
+output_validation:
+
+  - id: ARC-OV1
+    command: init
+    rule: questions_asked_non_empty
+    description: The questions_asked array must contain at least one entry.
+    check: "len(output.questions_asked) >= 1"
+    violation_message: >
+      Architect init output rejected: questions_asked array is empty.
+      The Architect must ask clarifying questions before producing a
+      learning brief (hard constraint ARC-HC1).
+
+  - id: ARC-OV2
+    command: outline
+    rule: justification_required_when_no_contested_nodes
+    description: >
+      When contested_or_edge_case_node_count is 0, the
+      justification_if_no_contested_nodes field must be present and non-empty.
+    check: >
+      if output.contested_or_edge_case_node_count == 0:
+        output.justification_if_no_contested_nodes is present and len > 0
+    violation_message: >
+      Architect outline output rejected: no contested or edge-case nodes
+      present and no justification provided (hard constraint ARC-HC3).
+
+  - id: ARC-OV3
+    command: outline
+    rule: contested_count_matches_nodes
+    description: >
+      The declared contested_or_edge_case_node_count must equal the actual
+      count of nodes with type contested or edge_case.
+    check: >
+      output.contested_or_edge_case_node_count ==
+      count(output.nodes where type in [contested, edge_case])
+    violation_message: >
+      Architect outline output rejected: contested_or_edge_case_node_count
+      does not match actual count of contested/edge_case nodes.
+
+  - id: ARC-OV4
+    command: outline
+    rule: node_ids_unique
+    description: All node ids in the outline must be unique.
+    check: "len(node ids) == len(unique node ids)"
+    violation_message: >
+      Architect outline output rejected: duplicate node id found.
+
+  - id: ARC-OV5
+    command: outline
+    rule: gap_placeholder_node_present
+    description: >
+      The outline must contain at least one node of type gap_placeholder
+      unless the Architect provides explicit justification. This is not
+      enforced as a hard validation failure — it produces a review checkpoint.
+    check: "count(output.nodes where type == gap_placeholder) >= 1"
+    on_failure: checkpoint_review
+    violation_message: >
+      Architect outline review: no gap_placeholder nodes found. The outline
+      may be presenting the subject as fully mappable. Verify this is intentional.
+
+# ---------------------------------------------------------------------------
+# Hard constraints
+# ---------------------------------------------------------------------------
+# Constraints that must hold on every output from this role.
+# All are enforced via output_validation rules above. Listed here for
+# cross-reference and runner error logging.
+
+hard_constraints:
+
+  - id: ARC-HC1
+    label: ask_before_building
+    description: >
+      Must ask clarifying questions before producing a learning brief.
+      The output cannot contain an empty questions_asked array.
+    enforcement: output_validation rule ARC-OV1
+    principle_ref: P5
+
+  - id: ARC-HC2
+    label: outline_nodes_must_be_typed
+    description: >
+      Every outline node must have a type from the defined enumeration.
+      Untyped nodes are structurally invalid.
+    enforcement: output_schema enum constraint on node.type
+    principle_ref: P1
+
+  - id: ARC-HC3
+    label: no_unexamined_clean_outline
+    description: >
+      Cannot produce an outline with no contested or edge-case nodes
+      without providing explicit justification.
+    enforcement: output_validation rule ARC-OV2
+    principle_ref: P1
+
+  - id: ARC-HC4
+    label: gap_placeholders_required
+    description: >
+      Must include placeholder nodes for suspected gaps. Absence produces
+      a review checkpoint (not a hard block) to allow for genuinely narrow
+      research scopes.
+    enforcement: output_validation rule ARC-OV5 (checkpoint_review on failure)
+    principle_ref: P1

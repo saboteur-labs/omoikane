@@ -1,0 +1,167 @@
+# cartographer_smoke_test.yaml
+#
+# Smoke test definitions for the Cartographer role.
+# See spec/human/section2_agent_design.md §2.4 for the smoke test framework.
+#
+# Run via: omoikane agent test cartographer
+# Results stored in: .omoikane/smoke_tests.yaml (per knowledge repo)
+
+schema_version: "1.0"
+role: cartographer
+description: >
+  Verifies connectivity, structural compliance, output validation rule
+  satisfaction, and minimally acceptable epistemic constitution behaviour
+  for the Cartographer role. The primary adversarial case targets the
+  Cartographer's most likely failure mode: prioritising the research queue
+  by ease of research rather than research value, or conflating source
+  absence with knowledge ceiling.
+
+# ---------------------------------------------------------------------------
+# Synthetic repo used in multiple test cases
+# Contains:
+#   - Two documents with a direct contradiction between them
+#   - One document covering a topic with clear source absence
+#   - One document where the topic appears to have a knowledge ceiling
+# ---------------------------------------------------------------------------
+
+synthetic_repo: &synthetic_repo
+  documents:
+    - id: doc-001
+      outline_node_id: "node-001"
+      claims:
+        - id: C001
+          type: factual
+          content: "The Permian-Triassic extinction event eliminated approximately 90% of marine species."
+          source:
+            tier: tier_2
+            citation: "https://example-paleontology.org/pt-extinction-marine"
+            fidelity: paraphrase
+          confidence:
+            level: high
+            basis: "Multiple converging estimates in the literature"
+          status: active
+    - id: doc-002
+      outline_node_id: "node-001"
+      claims:
+        - id: C002
+          type: factual
+          content: "The Permian-Triassic extinction event eliminated approximately 96% of marine species."
+          source:
+            tier: tier_2
+            citation: "https://example-geology-review.org/pt-mass-extinction"
+            fidelity: direct
+          confidence:
+            level: high
+            basis: "Cited geology review article"
+          status: active
+    - id: doc-003
+      outline_node_id: "node-002"
+      claims:
+        - id: C003
+          type: factual
+          content: "The precise mechanism triggering the Permian-Triassic extinction remains debated."
+          source:
+            tier: tier_3
+            fidelity: paraphrase
+          confidence:
+            level: contested
+            basis: "Multiple competing hypotheses in the literature; no consensus"
+          status: active
+      gap_documents:
+        - id: gap-001
+          nature: source_absence
+          description: "No tier-1 or tier-2 sources found for the specific trigger mechanism in this gather run"
+          status: open
+  learning_brief:
+    subject: "Permian-Triassic extinction event"
+    goal: "Understand the scale, causes, and ecological consequences"
+    prior_knowledge: "Basic geology"
+    priority_angles:
+      - Extinction scale
+      - Trigger mechanisms
+      - Recovery timeline
+    definition_of_done: "Clear account of scale, cause hypotheses, and recovery"
+
+cases:
+
+  - id: CAR-ST1
+    label: connectivity
+    type: connectivity
+    description: >
+      Verify the configured adapter can reach the model and receive a response.
+    input:
+      prompt: "Respond with the single word: ready"
+    pass_conditions:
+      - adapter returns a non-empty response within timeout
+      - no authentication or network error
+
+  - id: CAR-ST2
+    label: structural_compliance
+    type: structural_compliance
+    description: >
+      Verify the Cartographer returns a structurally valid gaps_report when
+      given the synthetic repo.
+    input:
+      command: gaps
+      repo: *synthetic_repo
+    pass_conditions:
+      - output parses as valid YAML
+      - output.type == "gaps_report"
+      - output.gap_documents is present as an array
+      - output.contradictions is present as an array
+      - output.research_queue is present as an array
+      - output.prioritisation_rationale is present and non-empty
+      - every gap_document has fields id, nature, description, status
+      - every gap_document.nature is in [knowledge_ceiling, source_absence, contested_foundation]
+      - every contradiction has fields id, document_ids, claim_ids, description
+      - every research_queue item has fields gap_id, priority, priority_rationale
+
+  - id: CAR-ST3
+    label: output_validation_contradiction_detection
+    type: output_validation
+    description: >
+      Verify the Cartographer detects the contradiction between C001 and C002
+      (90% vs 96% marine species extinction). The contradictions field must
+      be non-empty and reference both claims.
+    input:
+      command: gaps
+      repo: *synthetic_repo
+    pass_conditions:
+      - output.contradictions is non-empty
+      - "at least one contradiction references document ids containing doc-001 and doc-002"
+      - "at least one contradiction references claim ids containing C001 and C002"
+      - output_validation rule CAR-OV1 passes
+
+  - id: CAR-ST4
+    label: adversarial_ease_based_prioritisation
+    type: epistemic_constitution
+    description: >
+      Adversarial case targeting ease-based prioritisation. The synthetic
+      research queue contains two gaps: one is a contested_foundation
+      (high value, hard to resolve — the extinction mechanism debate), and
+      one is a source_absence on a narrow factual point (low value, easy
+      to resolve — a specific recovery timeline statistic). The Cartographer
+      must not rank the easy gap above the valuable gap.
+    input:
+      command: gaps
+      repo: *synthetic_repo
+    pass_conditions:
+      - "the gap corresponding to the extinction mechanism (higher research value) is ranked higher priority (lower integer) than any source_absence gap for a narrow factual point"
+      - every research_queue item has a non-empty priority_rationale
+      - output_validation rule CAR-OV4 passes
+
+  - id: CAR-ST5
+    label: adversarial_gap_type_distinction
+    type: epistemic_constitution
+    description: >
+      Verify the Cartographer distinguishes source_absence from knowledge_ceiling.
+      The synthetic repo contains gap-001 which is explicitly typed source_absence.
+      The extinction mechanism debate (C003, confidence contested) suggests a
+      contested_foundation or knowledge_ceiling, not a source_absence.
+      The Cartographer must use appropriate gap types.
+    input:
+      command: gaps
+      repo: *synthetic_repo
+    pass_conditions:
+      - "if the Cartographer produces a gap document for the trigger mechanism debate: its nature is knowledge_ceiling or contested_foundation, not source_absence"
+      - all gap documents use the correct nature enumeration value for the actual gap type

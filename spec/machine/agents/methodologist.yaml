@@ -1,0 +1,249 @@
+# methodologist.yaml
+#
+# Agent definition for the Methodologist role.
+# Canonical human-readable rationale: spec/human/section2_agent_design.md §2.2.6
+
+schema_version: "1.0"
+role: methodologist
+phase: 3
+commands:
+  - refine
+stance: >
+  Reflective and conservative. The Methodologist does not generate prompt
+  candidates lightly. It checks what is already known, reviews what prior
+  predictions got right and wrong, and produces candidates only when it has
+  sufficient independent signal. It does not promote its own candidates.
+capability_tier: high
+epistemic_constitution_ref: spec/machine/philosophy/epistemic_constitution.yaml
+
+# ---------------------------------------------------------------------------
+# Context budget
+# ---------------------------------------------------------------------------
+
+context_budget:
+  required:
+    - prompt_library          # current prompt library with lineage and signal history
+    - signal_history          # corrections, challenge acceptances, prediction outcomes
+    - learning_brief          # to interpret signal against research scope
+  optional:
+    - gaps_reports            # to run ceiling detection before generating candidates
+    - document_files          # to inspect signal sources directly
+  forbidden:
+    - challenge_reports       # Methodologist assesses prompt performance, not claim quality
+    - verification_reports    # same reason
+    - outline_node            # the Methodologist works at library level, not node level
+
+# ---------------------------------------------------------------------------
+# Output schema
+# ---------------------------------------------------------------------------
+
+output_schema:
+
+  refine:
+    root_type: refinement_report
+    required_fields:
+      - type
+      - ceiling_check_performed
+      - prediction_outcomes_reviewed
+      - independent_signal_count
+      - candidates
+    properties:
+      type:
+        type: string
+        enum: [refinement_report]
+      ceiling_check_performed:
+        type: boolean
+        enum: [true]
+        note: >
+          Must be true. A refinement report that did not perform ceiling
+          detection fails validation. See output_validation rule MET-OV1.
+      prediction_outcomes_reviewed:
+        type: boolean
+        enum: [true]
+        note: >
+          Must be true. A refinement report that did not review prior
+          prediction outcomes fails validation. See output_validation rule MET-OV2.
+      independent_signal_count:
+        type: integer
+        min: 0
+      ceiling_gaps:
+        type: array
+        required: false
+        items:
+          type: string
+          min_length: 1
+        note: Gap document IDs if ceiling detection found ceilings
+      candidates:
+        type: array
+        min_items: 0
+        items:
+          type: object
+          required_fields:
+            - id
+            - parent_id
+            - question
+            - rationale
+            - motivating_signal_ref
+            - prediction
+            - origin
+            - status
+          properties:
+            id:
+              type: string
+              min_length: 1
+            parent_id:
+              type: string
+              min_length: 1
+            question:
+              type: string
+              min_length: 1
+            rationale:
+              type: string
+              min_length: 1
+            motivating_signal_ref:
+              type: string
+              min_length: 1
+              note: >
+                Must reference a specific, identifiable signal. Generic
+                references like "general pattern" fail validation.
+                See output_validation rule MET-OV4.
+            prediction:
+              type: string
+              min_length: 1
+            origin:
+              type: string
+              enum: [refine-generated]
+            status:
+              type: string
+              enum: [candidate]
+
+# ---------------------------------------------------------------------------
+# Output validation rules
+# ---------------------------------------------------------------------------
+
+output_validation:
+
+  - id: MET-OV1
+    rule: ceiling_check_must_be_true
+    description: >
+      ceiling_check_performed must be true. The Methodologist must always
+      run ceiling detection before generating candidates.
+    check: "output.ceiling_check_performed == true"
+    violation_message: >
+      Methodologist refine output rejected: ceiling_check_performed is false
+      or missing (hard constraint MET-HC1).
+
+  - id: MET-OV2
+    rule: prediction_outcomes_must_be_reviewed
+    description: >
+      prediction_outcomes_reviewed must be true. The Methodologist must
+      always review prior prediction outcomes before generating candidates.
+    check: "output.prediction_outcomes_reviewed == true"
+    violation_message: >
+      Methodologist refine output rejected: prediction_outcomes_reviewed is
+      false or missing (hard constraint MET-HC2).
+
+  - id: MET-OV3
+    rule: candidates_empty_when_insufficient_signal
+    description: >
+      When independent_signal_count is less than 2, candidates must be empty.
+    check: >
+      if output.independent_signal_count < 2:
+        len(output.candidates) == 0
+    violation_message: >
+      Methodologist refine output rejected: candidates present but
+      independent_signal_count is less than 2 (hard constraint MET-HC3).
+
+  - id: MET-OV4
+    rule: motivating_signal_ref_specific
+    description: >
+      motivating_signal_ref must not be a generic string. It must reference
+      a signal ID or specific entry in the signal history.
+    check: >
+      for each candidate:
+        candidate.motivating_signal_ref is a valid reference to
+        an entry in signal_history
+    violation_message: >
+      Methodologist refine output rejected: candidate motivating_signal_ref
+      does not reference a specific signal (hard constraint MET-HC4).
+
+  - id: MET-OV5
+    rule: candidate_status_fixed
+    description: >
+      All candidates must have status candidate. The Methodologist cannot
+      set status to active.
+    check: >
+      for each candidate:
+        candidate.status == candidate
+    violation_message: >
+      Methodologist refine output rejected: candidate has status other than
+      'candidate'. The Methodologist cannot promote its own candidates
+      (hard constraint MET-HC5).
+
+  - id: MET-OV6
+    rule: candidate_origin_fixed
+    description: >
+      All candidates must have origin refine-generated.
+    check: >
+      for each candidate:
+        candidate.origin == refine-generated
+    violation_message: >
+      Methodologist refine output rejected: candidate has origin other than
+      'refine-generated'.
+
+# ---------------------------------------------------------------------------
+# Hard constraints
+# ---------------------------------------------------------------------------
+
+hard_constraints:
+
+  - id: MET-HC1
+    label: ceiling_check_mandatory
+    description: >
+      Must run ceiling detection before generating candidates. If a gap
+      reflects a knowledge ceiling, the appropriate output is a gap document,
+      not a refined prompt.
+    enforcement: output_validation rule MET-OV1
+    principle_ref: P4
+
+  - id: MET-HC2
+    label: review_predictions_first
+    description: >
+      Must review prediction outcomes before generating candidates. A
+      methodology that ignores its own prediction record is epistemically
+      unsound.
+    enforcement: output_validation rule MET-OV2
+    principle_ref: P4
+
+  - id: MET-HC3
+    label: two_signal_threshold
+    description: >
+      Requires at least two independent signals before generating any
+      candidate. Single-signal refinement is vulnerable to noise and
+      self-referential pattern matching.
+    enforcement: output_validation rule MET-OV3
+    principle_ref: P4
+
+  - id: MET-HC4
+    label: specific_signal_reference
+    description: >
+      Every candidate must reference the specific signal that motivated it.
+      A candidate motivated by "general pattern" is not acceptable.
+    enforcement: output_validation rule MET-OV4
+    principle_ref: P4
+
+  - id: MET-HC5
+    label: no_self_promotion
+    description: >
+      Cannot promote its own candidates. All candidates have status
+      'candidate'. Promotion is a CLI action requiring explicit human input.
+    enforcement: output_validation rule MET-OV5
+    principle_ref: P5
+
+  - id: MET-HC6
+    label: testable_prediction_required
+    description: >
+      Every candidate must include a testable prediction specifying what
+      better results would look like if the candidate prompt works.
+    enforcement: output_schema required field prediction with min_length 1
+    principle_ref: P4

@@ -1,0 +1,533 @@
+# commands.yaml
+#
+# Machine-readable definitions of all CLI commands.
+# Phase 1 commands are implemented first. Phase 2+ commands are specced
+# now to ensure phase 1 decisions do not foreclose them.
+#
+# Each command entry defines: syntax, phase, preconditions, agent invocation
+# (if any), outputs produced, checkpoints produced, and exit codes.
+#
+# Canonical human-readable rationale: spec/human/section5_cli_architecture.md
+
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Design principles (referenced by runner implementation)
+# ---------------------------------------------------------------------------
+
+design_principles:
+  - id: DP1
+    label: opinionated_about_sequence
+    statement: Enforce workflow ordering. Do not enforce pace.
+  - id: DP2
+    label: surface_state
+    statement: Every error message names the specific cause. No generic codes.
+  - id: DP3
+    label: fail_specifically
+    statement: >
+      Failure messages follow the pattern:
+      "Cannot run X because Y. To proceed, do Z."
+  - id: DP4
+    label: scriptable
+    statement: >
+      Consistent output formats, explicit and documented exit codes,
+      long-form output written to files with path reported to stdout.
+
+# ---------------------------------------------------------------------------
+# Phase 1 commands
+# ---------------------------------------------------------------------------
+
+commands:
+
+  - id: repo_init
+    namespace: repo
+    syntax: "omoikane repo init"
+    phase: 1
+    description: >
+      Initialises a new knowledge repo in the current directory. Runs the
+      Architect for the learning brief dialogue. Creates bootstrap prompts
+      for all command types. Triggers smoke tests for all configured adapters.
+    preconditions:
+      - No existing manifest.yaml in the current directory
+    agent_invocations:
+      - role: architect
+        command: init
+        context_provided:
+          - learning_brief_dialogue (interactive — runner mediates)
+    outputs_produced:
+      - manifest.yaml
+      - learning_brief.yaml
+      - "prompts/<id>.yaml for each bootstrap prompt type"
+      - ".omoikane/smoke_tests.yaml"
+    checkpoints_produced:
+      - type: inform
+        trigger: smoke test passed for each role
+        description: Smoke test result for the configured adapter/model.
+      - type: block
+        trigger: smoke test failed for any role
+        description: Role blocked pending smoke test pass or explicit override.
+    exit_codes:
+      0: Initialisation complete and all smoke tests passed
+      2: Repo already initialised in this directory
+      4: One or more smoke tests failed (roles blocked)
+      5: Adapter connectivity error during smoke test
+
+  - id: status
+    namespace: root
+    syntax: "omoikane status"
+    phase: 1
+    description: >
+      Displays current repo state: subject, outline version and status,
+      prompt library version, last activity, per-node outline progress,
+      open checkpoints, and research queue.
+    preconditions:
+      - manifest.yaml exists in the current directory
+    agent_invocations: []
+    outputs_produced:
+      - stdout formatted status display
+    checkpoints_produced: []
+    output_symbols:
+      gathered: "✓"
+      stale_or_low_trust: "⚠"
+      ungathered: "·"
+      blocked: "⊘"
+    exit_codes:
+      0: Success
+      2: No manifest found in current directory
+
+  - id: outline
+    namespace: root
+    syntax: "omoikane outline"
+    phase: 1
+    description: >
+      Runs the Architect to produce or revise the outline. The outline
+      is written to outline.yaml and registered in the manifest.
+    preconditions:
+      - manifest.yaml exists
+      - learning_brief.yaml exists
+    agent_invocations:
+      - role: architect
+        command: outline
+        context_provided:
+          - learning_brief
+          - existing_outline (if present, optional)
+          - repo_manifest
+    outputs_produced:
+      - outline.yaml
+      - manifest updated (outline.version incremented, outline.status set to draft)
+    checkpoints_produced:
+      - type: review
+        trigger: "outline.contested_or_edge_case_node_count == 0 and no justification"
+        description: No contested or edge-case nodes in outline. Verify this is intentional.
+    exit_codes:
+      0: Outline produced and written
+      3: Architect output failed validation
+      5: Adapter error
+
+  - id: outline_approve
+    namespace: root
+    syntax: "omoikane outline approve"
+    phase: 1
+    description: >
+      Approves the current draft outline, advancing its status to 'approved'
+      and unlocking gather runs on all nodes.
+    preconditions:
+      - manifest.yaml exists
+      - "outline.status == draft"
+    agent_invocations: []
+    outputs_produced:
+      - manifest updated (outline.status set to approved, outline.approved_at set)
+    checkpoints_produced:
+      - type: inform
+        trigger: always
+        description: Outline approved. Gather is now unlocked.
+    exit_codes:
+      0: Outline approved
+      2: "Outline is not in draft status (current status: <status>)"
+
+  - id: outline_amend
+    namespace: root
+    syntax: "omoikane outline amend <node-id>"
+    phase: 1
+    description: >
+      Amends a specific outline node after approval. Sets outline status
+      to 'amended' and produces a review checkpoint for the affected node.
+    preconditions:
+      - manifest.yaml exists
+      - Outline has been approved at least once (outline.approved_at is set)
+      - "<node-id> exists in outline.nodes"
+    agent_invocations: []
+    outputs_produced:
+      - outline.yaml updated (specified node amended)
+      - manifest updated (outline.status set to amended)
+    checkpoints_produced:
+      - type: review
+        trigger: always
+        description: Outline node amended after approval. Existing gathered document for this node may be stale.
+    exit_codes:
+      0: Node amended
+      2: Precondition failure (outline not yet approved, or node ID not found — specific reason in stderr)
+
+  - id: gather
+    namespace: root
+    syntax: "omoikane gather <node-id> [--prompt <prompt-id>]"
+    phase: 1
+    description: >
+      Runs the Scribe for the specified outline node using the active
+      gather prompt for that node (or a specified prompt for evaluation).
+      Validates the output before writing.
+    preconditions:
+      - manifest.yaml exists
+      - "outline.status is approved or amended"
+      - "node <node-id> status is ungathered or stale"
+      - No block checkpoint open on this node
+    agent_invocations:
+      - role: scribe
+        command: gather
+        context_provided:
+          - outline_node (the specified node)
+          - learning_brief
+          - assigned_prompt (active prompt or --prompt override)
+          - tier_1_sources (if provided by researcher for this node)
+    outputs_produced:
+      - "documents/<node-id>/<doc-id>.yaml"
+      - manifest updated (document registered, node status advanced)
+      - "gaps/<gap-id>.yaml for each gap document produced (if any)"
+    checkpoints_produced:
+      - type: inform
+        trigger: always
+        description: Document gathered. Review self-critique and unresolved questions.
+      - type: review
+        trigger: "document contains one or more gap documents"
+        description: Gap(s) identified during gather. Review gap findings.
+      - type: review
+        trigger: low_trust flag on producing adapter
+        description: Document produced by low-trust adapter. Trust not established.
+    exit_codes:
+      0: Document gathered and written
+      2: Precondition failure (specific reason stated)
+      3: Scribe output failed validation (specific rule stated)
+      5: Adapter error
+
+  - id: gather_next
+    namespace: root
+    syntax: "omoikane gather --next"
+    phase: 1
+    description: >
+      Equivalent to omoikane gather on the first ungathered node in outline
+      order with no open block checkpoints. Reports if all nodes are gathered.
+    preconditions:
+      - manifest.yaml exists
+      - "outline.status is approved or amended"
+      - At least one node is ungathered or stale with no block checkpoint
+    agent_invocations:
+      - role: scribe
+        command: gather
+        context_provided: same as gather command
+    exit_codes:
+      0: Document gathered and written
+      2: All nodes are gathered or blocked. Nothing to do.
+      3: Scribe output failed validation
+      5: Adapter error
+
+  - id: review
+    namespace: root
+    syntax: "omoikane review"
+    phase: 1
+    description: >
+      Lists all open checkpoints grouped by type: blocking first, then
+      review, then inform. Shows affected object, description, and
+      available resolution actions for each.
+    preconditions:
+      - manifest.yaml exists
+    agent_invocations: []
+    outputs_produced:
+      - stdout formatted checkpoint list
+    checkpoints_produced: []
+    exit_codes:
+      0: Success (even if no open checkpoints)
+      2: No manifest found
+
+  - id: resolve
+    namespace: root
+    syntax: "omoikane resolve <checkpoint-id> --action <action>"
+    phase: 1
+    description: >
+      Acts on an open checkpoint. Available actions depend on the checkpoint
+      type. Block checkpoints require explicit action before the affected
+      node can progress.
+    preconditions:
+      - manifest.yaml exists
+      - "<checkpoint-id> exists in open_checkpoints"
+    valid_actions_by_type:
+      inform:
+        - acknowledge
+      review:
+        - acknowledge
+        - note (opens editor for user_notes on affected object)
+        - dismiss (marks as reviewed with no action)
+      block:
+        - accept (researcher accepts the finding; next step depends on checkpoint)
+        - override (researcher explicitly overrides the block; produces an inform log entry)
+    agent_invocations: []
+    outputs_produced:
+      - manifest updated (checkpoint moved from open_checkpoints to history)
+      - Affected object updated if action requires it
+    exit_codes:
+      0: Checkpoint resolved
+      2: Checkpoint ID not found
+      1: Unknown action for this checkpoint type
+
+  - id: claim_correct
+    namespace: root
+    syntax: "omoikane claim correct <claim-id>"
+    phase: 1
+    description: >
+      Allows the researcher to correct the content of a specific claim.
+      Opens an editor for the correction. Sets claim status to 'corrected'
+      and records a user_correction signal event.
+    preconditions:
+      - manifest.yaml exists
+      - "<claim-id> exists in some active document"
+    agent_invocations: []
+    outputs_produced:
+      - Document file updated (claim status set to corrected, content updated)
+      - signal_history entry appended to the document
+      - manifest updated (signal aggregator notified)
+    checkpoints_produced:
+      - type: inform
+        trigger: always
+        description: Claim corrected and user_correction signal recorded.
+    exit_codes:
+      0: Claim corrected
+      2: Claim ID not found or document not active
+
+  - id: claim_retract
+    namespace: root
+    syntax: "omoikane claim retract <claim-id>"
+    phase: 1
+    description: >
+      Retracts a claim. Sets status to 'retracted'. The claim remains in
+      the document but is marked retracted — it is not deleted.
+    preconditions:
+      - manifest.yaml exists
+      - "<claim-id> exists in some active document"
+      - "claim.status is active or disputed (not already retracted)"
+    agent_invocations: []
+    outputs_produced:
+      - Document file updated (claim status set to retracted)
+      - signal_history entry appended
+    checkpoints_produced:
+      - type: inform
+        trigger: always
+        description: Claim retracted and signal recorded.
+    exit_codes:
+      0: Claim retracted
+      2: Claim ID not found or claim already retracted
+
+  - id: agent_test
+    namespace: agent
+    syntax: "omoikane agent test <role>"
+    phase: 1
+    description: >
+      Manually re-runs the smoke test for the specified agent role. Results
+      are written to .omoikane/smoke_tests.yaml. If the test passes and the
+      role was previously blocked or low-trust, the runner prompts the
+      researcher to confirm re-trust before clearing the flag.
+    preconditions:
+      - manifest.yaml exists
+      - "<role> is a valid agent role"
+      - Adapter configured for this role in .omoikane/config.yaml
+    agent_invocations:
+      - role: <specified role>
+        command: smoke_test (synthetic inputs from <role>_smoke_test.yaml)
+    outputs_produced:
+      - ".omoikane/smoke_tests.yaml updated with new test results and timestamp"
+    checkpoints_produced:
+      - type: block
+        trigger: smoke test failed
+        description: Role blocked. Reconfigure adapter or override to proceed with low-trust.
+      - type: inform
+        trigger: smoke test passed and role was previously low-trust
+        description: Smoke test passed. Confirm re-trust to clear low-trust flag.
+    exit_codes:
+      0: Smoke test passed
+      4: Smoke test failed (role blocked)
+      5: Adapter connectivity error
+      1: Unknown role
+
+# ---------------------------------------------------------------------------
+# Phase 2 commands (specced; not implemented until phase 2)
+# ---------------------------------------------------------------------------
+
+  - id: challenge
+    namespace: root
+    syntax: "omoikane challenge <doc-id>"
+    phase: 2
+    description: Runs the Critic on the specified document.
+    preconditions:
+      - "<doc-id> has status active"
+      - No open challenge checkpoint on this document
+    agent_invocations:
+      - role: critic
+        command: challenge
+    exit_codes:
+      0: Challenge report written
+      2: Precondition failure
+      3: Critic output failed validation
+      5: Adapter error
+
+  - id: verify
+    namespace: root
+    syntax: "omoikane verify <doc-id>"
+    phase: 2
+    description: Runs the Auditor on the specified document.
+    preconditions:
+      - "<doc-id> has status active"
+      - A completed challenge report exists for this document
+    agent_invocations:
+      - role: auditor
+        command: verify
+    exit_codes:
+      0: Verification report written
+      2: Precondition failure
+      3: Auditor output failed validation
+      5: Adapter error
+
+  - id: gaps
+    namespace: root
+    syntax: "omoikane gaps"
+    phase: 2
+    description: Runs the Cartographer on the full repo.
+    preconditions:
+      - At least one active document exists in the repo
+    agent_invocations:
+      - role: cartographer
+        command: gaps
+    exit_codes:
+      0: Gaps report written
+      2: Precondition failure
+      3: Cartographer output failed validation
+      5: Adapter error
+
+# ---------------------------------------------------------------------------
+# Phase 3 commands (specced; not implemented until phase 3)
+# ---------------------------------------------------------------------------
+
+  - id: refine
+    namespace: root
+    syntax: "omoikane refine"
+    phase: 3
+    description: Runs the Methodologist to generate prompt candidates.
+    preconditions:
+      - Signal aggregator reports at least one prompt has reached the two-signal threshold
+    agent_invocations:
+      - role: methodologist
+        command: refine
+    exit_codes:
+      0: Refinement report written and candidates registered
+      2: No prompt has reached the two-signal threshold
+      3: Methodologist output failed validation
+      5: Adapter error
+
+  - id: prompt_show
+    namespace: prompt
+    syntax: "omoikane prompt show <prompt-id>"
+    phase: 3
+    description: Displays a prompt entry in full including lineage and performance.
+    exit_codes:
+      0: Success
+      2: Prompt ID not found
+
+  - id: prompt_diff
+    namespace: prompt
+    syntax: "omoikane prompt diff <prompt-id-a> <prompt-id-b>"
+    phase: 3
+    description: Shows text differences between two prompts and their lineage relationship.
+    exit_codes:
+      0: Success
+      2: One or both prompt IDs not found
+
+  - id: prompt_promote
+    namespace: prompt
+    syntax: "omoikane prompt promote <prompt-id>"
+    phase: 3
+    description: >
+      Promotes a candidate prompt to active. Blocked if the human-signal
+      requirement is not met (see lifecycle.yaml PROM-R1).
+    exit_codes:
+      0: Promoted
+      2: Precondition failure (prompt not a candidate, or human-signal requirement not met — specific reason in stderr)
+
+  - id: prompt_reject
+    namespace: prompt
+    syntax: "omoikane prompt reject <prompt-id> --reason <text>"
+    phase: 3
+    description: Rejects a candidate and archives it as deprecated with the given reason.
+    exit_codes:
+      0: Rejected and archived
+      2: Prompt is not a candidate
+      1: No reason provided
+
+  - id: prompt_fork
+    namespace: prompt
+    syntax: "omoikane prompt fork <prompt-id>"
+    phase: 3
+    description: >
+      Creates a new candidate branching from the specified prompt
+      (not necessarily the current active tip of its lineage).
+    exit_codes:
+      0: Fork candidate created
+      2: Prompt ID not found
+
+  - id: prompt_predictions
+    namespace: prompt
+    syntax: "omoikane prompt predictions"
+    phase: 3
+    description: Lists all predictions and their outcomes.
+    exit_codes:
+      0: Success
+
+# ---------------------------------------------------------------------------
+# Inspection commands (phase 2+)
+# ---------------------------------------------------------------------------
+
+  - id: repo_docs
+    namespace: repo
+    syntax: "omoikane repo docs"
+    phase: 2
+    description: Lists all documents with status and provenance.
+    exit_codes:
+      0: Success
+
+  - id: repo_gaps
+    namespace: repo
+    syntax: "omoikane repo gaps"
+    phase: 2
+    description: Lists all gap documents with status.
+    exit_codes:
+      0: Success
+
+  - id: repo_prompts
+    namespace: repo
+    syntax: "omoikane repo prompts"
+    phase: 3
+    description: Lists the prompt library with lineage.
+    exit_codes:
+      0: Success
+
+# ---------------------------------------------------------------------------
+# Rendering command
+# ---------------------------------------------------------------------------
+
+  - id: spec_render
+    namespace: spec
+    syntax: "omoikane spec render [section]"
+    phase: 1
+    description: >
+      Generates a docx from the Omoikane project spec markdown. Only
+      applicable to the Omoikane spec itself — not for knowledge repo
+      content. Output written to spec/dist/ which is gitignored.
+    exit_codes:
+      0: Docx written to spec/dist/
+      1: Section not found
