@@ -338,17 +338,34 @@ open_questions:
       The lineage_generation_threshold (currently 5) and
       consecutive_refutation_threshold (currently 3) in lifecycle.yaml
       are not empirically validated.
-    resolution_approach: >
-      Treat as configurable parameters in the runner from the start rather
-      than hard-coded constants. Revisit after real repos provide signal data.
+    status: resolved
+    decision: >
+      Both thresholds are configurable per knowledge repo in
+      .omoikane/config.yaml under the methodology key. The values 5 and 3
+      remain the defaults when no config override is present. The runner
+      validates that overrides are positive integers >= 1.
+    decision_rationale: >
+      Making them configurable allows researchers to tune based on actual
+      signal accumulation rates without code changes. The right values are
+      genuinely unknown until real repos provide data.
+    spec_update: prompt_library/lifecycle.yaml lineage_health configurable fields
 
   - id: OQ2
     section_ref: "section7_roadmap.md §7.2"
     description: >
       Whether Ollama support ships in phase 1 or phase 2 is not resolved.
-    resolution_approach: >
-      Design the adapter interface to make the answer structurally irrelevant.
-      Adding ollama.js in phase 2 must require no changes to the interface.
+    status: resolved
+    decision: >
+      Ollama is formally deferred to phase 2. Claude is the phase 1
+      minimum. OpenAI-compatible is optional in phase 1. The adapter
+      interface is fully specified in spec/machine/runner/adapter_interface.yaml
+      so that adding ollama.js in phase 2 requires only implementing that
+      interface — no other component requires modification.
+    decision_rationale: >
+      Practical priority decision, not a technical constraint. Phase 1
+      scope is kept tight. The model-agnostic architecture is proven by
+      the interface design, not by shipping multiple adapters simultaneously.
+    spec_update: spec/machine/runner/adapter_interface.yaml (new file)
 
   - id: OQ3
     section_ref: "section7_roadmap.md §7.8"
@@ -356,26 +373,51 @@ open_questions:
       Parallel gather semantics in phase 4 are sketched but not fully specced.
       How two replication documents are compared, what disagreement produces,
       and how the researcher resolves divergent findings is unresolved.
-    resolution_approach: >
-      Design the MAN-VR1 relaxation conservatively in phase 4. Do not
-      design it in a way that requires restructuring the manifest.
+    status: resolved
+    decision: >
+      Deferred entirely to phase 4. The only forward-compatibility
+      requirement is FC8: MAN-VR1 must remain a validation rule, not a
+      structural encoding, so phase 4 can relax it without schema migration.
+      FC8 is already satisfied. The comparison algorithm, output types,
+      and resolution flow are phase 4 design problems.
+    decision_rationale: >
+      Designing a phase 4 mechanism without implementation experience risks
+      over-specifying a feature that may look different once phases 2-3 are
+      built and the claim and checkpoint model is better understood in practice.
 
   - id: OQ4
     section_ref: "section6_persistence.md §6.7"
     description: >
       The manifest merge conflict solution for phase 4 multi-researcher use
       is not yet designed.
-    resolution_approach: >
-      Do not encode assumptions that would foreclose a custom git merge driver.
-      The manifest format must remain human-resolvable as a fallback.
+    status: resolved
+    decision: >
+      Deferred entirely to phase 4. The only forward-compatibility
+      requirement is that the manifest must remain human-resolvable as a
+      fallback — already recorded in persistence/model.yaml git_friendliness.
+      The form of the solution (merge command, git driver, or other) is a
+      phase 4 design problem.
+    decision_rationale: >
+      Phase 4 designers will work from a fully-built manifest implementation.
+      Committing to a specific merge strategy before phases 2-3 are built
+      risks foreclosing better approaches.
 
   - id: OQ5
     section_ref: "section7_roadmap.md §7.8"
     description: >
       The definition of the confidence_delta baseline for the signal aggregator
       is not precisely specified.
-    resolution_approach: >
-      Define precisely before implementing the signal aggregator. Candidate
-      definitions: mean confidence of all documents in the repo; mean confidence
-      of documents on the same outline node type; mean confidence of documents
-      produced by the same prompt. The choice affects what confidence_delta means.
+    status: resolved
+    decision: >
+      The baseline is the repo-wide mean confidence of all active claims
+      across all active documents, computed at gather time. confidence_delta
+      equals the document's mean claim confidence minus this repo baseline.
+      Confidence levels map to numeric values: high=1.0, medium=0.67,
+      low=0.33, contested=0.50. Node-type-scoped baselines are a potential
+      future refinement but are not the initial design.
+    decision_rationale: >
+      A repo-wide mean recovers quickly from cold start, is non-circular,
+      and is computable in a single SQL query against the claims table.
+      Node-type-scoped means require meaningful node population before they
+      are stable, making them unreliable early in a repo's life.
+    spec_update: prompt_library/lifecycle.yaml confidence_delta section

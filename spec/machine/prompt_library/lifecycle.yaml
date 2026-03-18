@@ -278,11 +278,81 @@ lineage_health:
         ancestor rather than extending the current tip further.
   lineage_generation_threshold: 5
   consecutive_refutation_threshold: 3
-  note: >
-    The generation threshold of 5 and refutation threshold of 3 are initial
-    values. They are not empirically validated — the system has not yet run
-    on real repos. These values should be revisited once signal data is available.
-    See section4_prompt_library.md §4.6.3 (genuine uncertainty note).
+  configurable: true
+  config_location: .omoikane/config.yaml
+  config_keys:
+    lineage_generation_threshold: methodology.lineage_generation_threshold
+    consecutive_refutation_threshold: methodology.consecutive_refutation_threshold
+  config_example: |
+    methodology:
+      lineage_generation_threshold: 7
+      consecutive_refutation_threshold: 4
+  config_validation: >
+    Both values must be positive integers >= 1. The runner rejects values
+    below 1 and falls back to the defaults above, logging a warning.
+  rationale: >
+    These thresholds are not empirically validated. Making them configurable
+    per knowledge repo allows researchers to tune based on actual signal
+    accumulation rates without code changes. The values above are the
+    defaults when no config override is present. See phases.yaml OQ1.
+
+# ---------------------------------------------------------------------------
+# Confidence delta baseline definition
+# ---------------------------------------------------------------------------
+# Resolution of OQ5. Defines the precise baseline used when computing
+# confidence_delta for the signal aggregator.
+
+confidence_delta:
+  baseline: repo_wide_mean
+  description: >
+    confidence_delta is the document's mean claim confidence minus the
+    repo-wide baseline. Positive means the document is more confident than
+    the repo average; negative means less confident.
+  baseline_definition: >
+    The repo-wide mean confidence of all active claims across all active
+    documents, computed at the time of the gather run. A single number
+    for the whole repo — not scoped by node type or prompt.
+  rationale: >
+    A repo-wide mean recovers quickly from cold start (meaningful after
+    a few gather runs), is non-circular (not measured against itself),
+    and is computable in one SQL query against the claims table. Node-type-
+    scoped baselines are a potential future refinement once real repos
+    provide data on whether cross-type comparisons cause distortion,
+    but are not the initial design. See phases.yaml OQ5.
+  confidence_numeric_mapping:
+    high: 1.0
+    medium: 0.67
+    low: 0.33
+    contested: 0.50
+    note: >
+      Contested claims are mapped to 0.50 (midpoint) because contestation
+      signals genuine uncertainty rather than low confidence in a single
+      direction. This is a convention; it is not an empirical measurement.
+  computation:
+    step_1: >
+      Map each active claim's confidence.level to its numeric value above.
+    step_2: >
+      Compute the repo baseline: mean of all active claim numeric values
+      across all active documents. Raw claim values are averaged directly
+      (not per-document means averaged) to avoid weighting short documents
+      equally with long ones.
+    step_3: >
+      Compute the document mean: mean of numeric values for claims in
+      this document only.
+    step_4: "confidence_delta = document_mean - repo_baseline"
+  edge_cases:
+    - condition: No active claims exist yet (first gather run)
+      action: >
+        confidence_delta is null. Not recorded as a signal event. The
+        baseline requires at least one prior active document.
+    - condition: Document has no claims
+      action: >
+        Should not occur — SCR-OV1 requires at least one claim. If it
+        does occur, confidence_delta is null and a runner warning is logged.
+  recorded_in: >
+    signal_history entry of type confidence_delta. The numeric delta value
+    is stored alongside the standard signal_history fields as delta_value.
+  used_by: [signal_aggregator, methodologist]
 
 # ---------------------------------------------------------------------------
 # Bootstrap prompt specification

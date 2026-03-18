@@ -60,6 +60,10 @@ omoikane/
       cli/
         commands.yaml
         checkpoints.yaml
+      runner/
+        adapter_interface.yaml     # adapter contract + phase scope decisions
+      roadmap/
+        phases.yaml
     dist/                          # GITIGNORED — generated artifacts only
       *.docx
   src/                             # implementation (phase 1 onwards)
@@ -384,11 +388,14 @@ addition. Nothing ships in phase 1 without them.
 - [x] `spec/machine/persistence/model.yaml` — complete
 - [x] `spec/human/section7_roadmap.md` — complete
 - [x] `spec/machine/roadmap/phases.yaml` — complete
+- [x] `spec/machine/runner/adapter_interface.yaml` — complete (OQ2 resolution)
+- [x] Open questions OQ1–OQ5 — resolved
 - [ ] Implementation — phase 1
 
-**Start here:** `src/runner/adapters/claude.js` — the adapter layer is the
-natural first implementation target. The output validation layer and agent
-execution both depend on it.
+**Start here:** `src/runner/adapters/claude.js` — the adapter interface is
+fully specified in `spec/machine/runner/adapter_interface.yaml`. Implement
+that contract. The output validation layer and agent execution both depend
+on the adapter layer being in place.
 
 **Key constraints to carry into implementation:**
 
@@ -396,4 +403,6 @@ execution both depend on it.
 - Every agent role must have a passing smoke test before being trusted with real repo data
 - Smoke tests block phase 1 shipping — they are not optional
 - Phase 1 decisions must not foreclose phases 2–4 (see `spec/machine/roadmap/phases.yaml` FC1–FC8)
-- Open questions from section 7 must be resolved before the components they affect are implemented
+- Lineage thresholds are configurable via `.omoikane/config.yaml` under `methodology.*` — do not hard-code
+- Confidence delta baseline is repo-wide mean of all active claims — defined in `lifecycle.yaml`
+- Ollama is deferred to phase 2 — do not implement it in phase 1
