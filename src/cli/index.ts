@@ -22,6 +22,14 @@ import {
   OutlineNotApprovedError,
   OutlineNodeNotFoundError,
 } from './commands/outline.ts';
+import {
+  GatherOutlineNotReadyError,
+  GatherNodeNotFoundError,
+  GatherNodeNotGatherableError,
+  GatherNodeBlockedError,
+  GatherNothingTodoError,
+  GatherPromptNotFoundError,
+} from './commands/gather.ts';
 
 const HELP = `
 Omoikane — AI-augmented research and learning tool
@@ -103,7 +111,13 @@ function handleFatalError(err: unknown): never {
     err instanceof RepoNotInitialisedError ||
     err instanceof OutlineNotInDraftError ||
     err instanceof OutlineNotApprovedError ||
-    err instanceof OutlineNodeNotFoundError
+    err instanceof OutlineNodeNotFoundError ||
+    err instanceof GatherOutlineNotReadyError ||
+    err instanceof GatherNodeNotFoundError ||
+    err instanceof GatherNodeNotGatherableError ||
+    err instanceof GatherNodeBlockedError ||
+    err instanceof GatherNothingTodoError ||
+    err instanceof GatherPromptNotFoundError
   ) {
     process.stderr.write(`Error: ${err.message}\n`);
     process.exit(2);

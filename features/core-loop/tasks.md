@@ -242,7 +242,7 @@
 **Depends on:** 12
 **Estimate:** 8
 **Notes:** The Scribe's `output_schema` is narrower than the full document schema — the pipeline wraps it. Signal-history entries must carry `signal_type`/`signal_category` (FC5) and not preclude an `author` field (FC6). This is the heart of the core loop.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 

@@ -205,8 +205,6 @@ describe('CLI integration', () => {
   test('each Phase 1 stub command exits 0', () => {
     const stubs: string[][] = [
       ['status'],
-      ['gather', 'node-001'],
-      ['gather', '--next'],
       ['review'],
       ['resolve', 'cp-001', '--action', 'acknowledge'],
       ['claim', 'correct', 'claim-001'],

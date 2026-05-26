@@ -1,12 +1,32 @@
 import type { ParsedCommand } from '../types.ts';
+import {
+  runGather,
+  runGatherNext,
+  GatherOutlineNotReadyError,
+  GatherNodeNotFoundError,
+  GatherNodeNotGatherableError,
+  GatherNodeBlockedError,
+  GatherNothingTodoError,
+  GatherPromptNotFoundError,
+} from '../../runner/gather_pipeline.ts';
+import { buildAdapter } from './agent.ts';
+
+export {
+  GatherOutlineNotReadyError,
+  GatherNodeNotFoundError,
+  GatherNodeNotGatherableError,
+  GatherNodeBlockedError,
+  GatherNothingTodoError,
+  GatherPromptNotFoundError,
+};
 
 export async function handleGather(command: ParsedCommand): Promise<void> {
+  const repoDir = process.cwd();
+  const options = { adapterFactory: buildAdapter };
+
   if (command.id === 'gather_next') {
-    // Gather the next ungathered node in outline order with no open block checkpoints
-    process.stderr.write('Not yet implemented: gather --next\n');
+    return runGatherNext(repoDir, options);
   } else {
-    // Gather a specific outline node using the active prompt (or --prompt override)
-    const promptSuffix = command.promptId ? ` --prompt ${command.promptId}` : '';
-    process.stderr.write(`Not yet implemented: gather ${command.nodeId}${promptSuffix}\n`);
+    return runGather(repoDir, command.nodeId!, command.promptId, options);
   }
 }

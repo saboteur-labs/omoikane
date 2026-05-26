@@ -32,6 +32,26 @@
 
 ---
 
+## 2026-05-25 — Task 13: `gather <node>` and `gather --next`
+
+**Item:** Document `id` field is pre-computed using duplicated seq logic
+
+**Why deferred:** `StateManager.writeDocument` computes the document ID internally (via `nextSeq`). To include the `id` field in the document YAML at write time, the pipeline pre-computes the same seq by scanning the directory. This logic duplicates `nextSeq` in `state_manager.ts`. It is safe in a single-user CLI context.
+
+**Context:** If `StateManager` grows a `computeNextDocumentId(nodeId, date)` helper, the pipeline should use it instead of the inline seq scan in `src/runner/gather_pipeline.ts` (`nextSeq` helper). Related: gap IDs have the same pattern.
+
+---
+
+## 2026-05-25 — Task 13: `gather <node>` and `gather --next` (additional)
+
+**Item:** `signal_history` in documents starts empty; no gather-creation signal in the document YAML
+
+**Why deferred:** The document schema's `signal_history` field tracks post-creation mutations (corrections, critic findings, etc.). The gather event itself is captured by document provenance (`provenance.adapter`, `provenance.model`, `provenance.date`). The SQLite `signal_events` table records the gather event during `reindex`. FC5 (signal_type/signal_category required) and FC6 (author field not precluded) are satisfied vacuously at Phase 1 since no signal_history entries exist at creation time.
+
+**Context:** If a Phase 2 signal needs to reference the gather event, `reindex` populates `signal_events` from document provenance (not from `signal_history`). Phase 2 code adding signal_history entries must include `signal_type` and `signal_category` fields to satisfy FC5.
+
+---
+
 ## 2026-05-25 — Task 11: `omoikane repo init`
 
 **Item:** Smoke tests during init cover only Phase 1 roles (architect, scribe), not all 6 configured roles
