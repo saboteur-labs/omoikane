@@ -19,7 +19,7 @@
     "build": "node scripts/build.js",
     "prepare": "pnpm run build",
     "pretest": "pnpm run build",
-    "test": "node --import tsx/esm --test test/**/*.test.ts",
+    "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
     "dev": "node --import tsx/esm src/cli/index.ts"
   },
   "dependencies": {

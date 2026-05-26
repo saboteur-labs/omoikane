@@ -78,7 +78,7 @@
 **Depends on:** 2, 3
 **Estimate:** 5
 **Notes:** This is the Phase 1 minimum adapter (P1 ships on Claude). Default model `claude-sonnet-4-6`. Mock the HTTP layer in unit tests; real connectivity is proven in **Gate A**.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
