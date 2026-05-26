@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import yaml from 'js-yaml';
 import type { Adapter, SmokeTestResult } from '../adapters/interface.ts';
 import type { StateManager } from '../state/state_manager.ts';
@@ -8,6 +7,7 @@ import { assembleConstitution } from '../constitution.ts';
 import { createCheckpoint } from '../checkpoints/registry.ts';
 import { smokeTestsPath, toDateStamp } from '../state/paths.ts';
 import { evaluateCase, type SmokeTestCase } from './evaluators.ts';
+import { findProjectRoot } from '../project_root.ts';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -76,8 +76,7 @@ interface SmokeTestsFile {
 // Spec loading
 // ---------------------------------------------------------------------------
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SPEC_DIR = resolve(__dirname, '..', '..', '..', 'spec', 'machine', 'agents');
+const DEFAULT_SPEC_DIR = join(findProjectRoot(import.meta.url), 'spec', 'machine', 'agents');
 
 function loadSmokeTestSpec(role: string, specDir: string = DEFAULT_SPEC_DIR): SmokeTestSpec {
   const filePath = resolve(specDir, `${role}_smoke_test.yaml`);

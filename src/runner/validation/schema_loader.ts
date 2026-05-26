@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import yaml from 'js-yaml';
 import type { AgentSpec } from './types.ts';
+import { findProjectRoot } from '../project_root.ts';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SPEC_DIR = resolve(__dirname, '..', '..', '..', 'spec', 'machine', 'agents');
+const DEFAULT_SPEC_DIR = join(findProjectRoot(import.meta.url), 'spec', 'machine', 'agents');
 
 const cache = new Map<string, AgentSpec>();
 

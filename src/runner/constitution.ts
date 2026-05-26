@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import yaml from 'js-yaml';
+import { findProjectRoot } from './project_root.ts';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CONSTITUTION_PATH = resolve(__dirname, '..', '..', 'spec', 'machine', 'philosophy', 'epistemic_constitution.yaml');
+const CONSTITUTION_PATH = join(
+  findProjectRoot(import.meta.url),
+  'spec', 'machine', 'philosophy', 'epistemic_constitution.yaml',
+);
 
 interface Directive {
   id: string;
