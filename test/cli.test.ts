@@ -214,7 +214,6 @@ describe('CLI integration', () => {
       ['resolve', 'cp-001', '--action', 'acknowledge'],
       ['claim', 'correct', 'claim-001'],
       ['claim', 'retract', 'claim-001'],
-      ['agent', 'test', 'scribe'],
     ];
     for (const args of stubs) {
       const result = runCLI(args);

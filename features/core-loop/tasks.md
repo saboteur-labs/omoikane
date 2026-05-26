@@ -170,7 +170,7 @@
 **Depends on:** 9
 **Estimate:** 2
 **Notes:** This is also the most convenient manual probe for the adapter, used directly in Gate B.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 

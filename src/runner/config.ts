@@ -14,7 +14,7 @@ export interface OmoikaneConfig {
 const DEFAULT_ADAPTER = 'claude';
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
-const KNOWN_ROLES = ['architect', 'scribe', 'critic', 'auditor', 'cartographer', 'methodologist'];
+export const KNOWN_ROLES = ['architect', 'scribe', 'critic', 'auditor', 'cartographer', 'methodologist'];
 
 function defaults(): OmoikaneConfig {
   const agents: Record<string, AgentConfig> = {};

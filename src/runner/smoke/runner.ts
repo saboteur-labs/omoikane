@@ -41,6 +41,13 @@ export class SmokeTestSpecNotFoundError extends Error {
   }
 }
 
+export class SmokeTestBlockedError extends Error {
+  constructor(public readonly role: string) {
+    super(`Smoke tests failed for role '${role}'. Role is blocked.`);
+    this.name = 'SmokeTestBlockedError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Internal types (file format)
 // ---------------------------------------------------------------------------
