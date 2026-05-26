@@ -54,7 +54,7 @@
 **Depends on:** 1
 **Estimate:** 5
 **Notes:** This is the structural-enforcement core (Phase 1 non-negotiable P1-NN2). It must be model-agnostic — it sees only a parsed object. ARC-OV5 (gap_placeholder) resolves to a *review checkpoint*, not a hard failure — return that distinction rather than rejecting.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
