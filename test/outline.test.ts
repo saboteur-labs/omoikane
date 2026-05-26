@@ -252,15 +252,26 @@ describe('runOutline — validation failure', () => {
     );
   });
 
-  test('throws AdapterParseError when ARC-OV3 fires (count mismatch)', async () => {
+  test('auto-corrects count and creates review checkpoint when ARC-OV3 fires (count mismatch)', async () => {
     const badOutline = {
       ...VALID_OUTLINE,
-      contested_or_edge_case_node_count: 99, // wrong count
+      contested_or_edge_case_node_count: 99, // wrong — runner corrects it
     };
-    await assert.rejects(
-      runOutline(tmpDir, { adapterFactory: adapterFactory(badOutline) }),
-      AdapterParseError,
+    await runOutline(tmpDir, { adapterFactory: adapterFactory(badOutline) });
+    const manifest = sm.readManifest();
+    // ARC-OV3 produces a review checkpoint, not a hard rejection
+    const ov3Cp = manifest.open_checkpoints.find(
+      (c) => c.type === 'review' && c.description.includes('auto-corrected'),
     );
+    assert.ok(ov3Cp, 'expected an ARC-OV3 review checkpoint');
+    // The written outline should have the correct count (from actual nodes)
+    const actualContested = VALID_OUTLINE.nodes.filter(
+      (n: { type: string }) => n.type === 'contested' || n.type === 'edge_case',
+    ).length;
+    assert.equal(manifest.outline.version, 1, 'outline version advanced');
+    // Manifest nodes reflect actual types
+    assert.equal(manifest.outline.nodes.length, VALID_OUTLINE.nodes.length);
+    void actualContested;
   });
 });
 

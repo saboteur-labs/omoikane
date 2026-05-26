@@ -118,14 +118,21 @@ export async function runOutline(repoDir: string, options: OutlineOptions = {}):
   process.stdout.write('Invoking Architect for outline...\n');
   const response = await adapter.invoke('architect', context, constitution);
 
-  const valResult = validate('architect', 'outline', response.parsed);
+  // Validate raw output — ARC-OV3 fires as checkpoint_review if the declared
+  // count doesn't match actual nodes. Other rules fire as hard violations.
+  const parsedOutline = response.parsed as Record<string, unknown>;
+  const valResult = validate('architect', 'outline', parsedOutline);
   if (!valResult.valid) {
     const msgs = valResult.violations.map((v) => `  - [${v.ruleId}] ${v.message}`).join('\n');
     throw new AdapterParseError(`Architect outline output failed validation:\n${msgs}`);
   }
 
-  const parsedOutline = response.parsed as Record<string, unknown>;
-  const nodes = parsedOutline.nodes as OutlineNode[];
+  // Compute the correct count from actual node types — always use this when
+  // writing. ARC-OV3 checkpoint (if fired above) signals any mismatch.
+  const nodes = (parsedOutline.nodes as OutlineNode[]) ?? [];
+  const actualContestedCount = nodes.filter(
+    (n) => n.type === 'contested' || n.type === 'edge_case',
+  ).length;
   const now = new Date().toISOString();
   const newVersion = manifest.outline.version + 1;
 
@@ -136,7 +143,7 @@ export async function runOutline(repoDir: string, options: OutlineOptions = {}):
     type: parsedOutline.type as string,
     version: newVersion,
     nodes,
-    contested_or_edge_case_node_count: parsedOutline.contested_or_edge_case_node_count as number,
+    contested_or_edge_case_node_count: actualContestedCount,
     ...(parsedOutline.justification_if_no_contested_nodes != null
       ? { justification_if_no_contested_nodes: parsedOutline.justification_if_no_contested_nodes as string }
       : {}),
@@ -154,7 +161,7 @@ export async function runOutline(repoDir: string, options: OutlineOptions = {}):
   }));
   sm.writeManifest(manifest);
 
-  // ARC-OV5 fires as a review checkpoint (on_failure: checkpoint_review)
+  // ARC-OV5 and ARC-OV3 fire as review checkpoints (on_failure: checkpoint_review)
   for (const cp of valResult.checkpoints) {
     if (cp.ruleId === 'ARC-OV5') {
       createCheckpoint(repoDir, sm, {
@@ -165,6 +172,18 @@ export async function runOutline(repoDir: string, options: OutlineOptions = {}):
         description:
           'No gap_placeholder nodes found in outline. The outline may be presenting the ' +
           'subject as fully mappable. Verify this is intentional.',
+        principle_ref: 'P1',
+      });
+    }
+    if (cp.ruleId === 'ARC-OV3') {
+      createCheckpoint(repoDir, sm, {
+        prefix: 'ARC',
+        type: 'review',
+        produced_by: 'runner',
+        affected_object_id: 'outline',
+        description:
+          'Architect contested_or_edge_case_node_count was auto-corrected by the runner. ' +
+          `Corrected count: ${actualContestedCount}. Review the outline node types.`,
         principle_ref: 'P1',
       });
     }

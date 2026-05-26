@@ -318,18 +318,20 @@ describe('ARC-OV2 — justification required when contested_count is 0', () => {
 // ---------------------------------------------------------------------------
 
 describe('ARC-OV3 — contested_count matches actual nodes', () => {
-  test('declared count wrong fires ARC-OV3', () => {
+  test('declared count wrong fires ARC-OV3 as checkpoint_review (not a hard violation)', () => {
     const output = { ...validArchitectOutline, contested_or_edge_case_node_count: 5 };
     const result = validate('architect', 'outline', output);
-    assert.equal(result.valid, false);
-    const ov3 = result.violations.find((v) => v.ruleId === 'ARC-OV3');
-    assert.ok(ov3, 'ARC-OV3 violation should be present');
+    assert.equal(result.valid, true, 'ARC-OV3 mismatch should not fail validation');
+    assert.ok(!result.violations.find((v) => v.ruleId === 'ARC-OV3'), 'ARC-OV3 should not be a hard violation');
+    const ov3 = result.checkpoints.find((v) => v.ruleId === 'ARC-OV3');
+    assert.ok(ov3, 'ARC-OV3 should be a review checkpoint');
     assert.match(ov3.message, /contested_or_edge_case_node_count/);
   });
 
   test('declared count correct passes ARC-OV3', () => {
     const result = validate('architect', 'outline', validArchitectOutline);
     assert.ok(!result.violations.find((v) => v.ruleId === 'ARC-OV3'));
+    assert.ok(!result.checkpoints.find((v) => v.ruleId === 'ARC-OV3'));
   });
 });
 

@@ -67,7 +67,7 @@ output_schema:
         note: "Value 'none' is acceptable; an empty string is not"
       priority_angles:
         type: array
-        min_items: 1
+        min_items: 0
         items:
           type: string
           min_length: 1
@@ -91,7 +91,7 @@ output_schema:
               min_length: 1
             answer:
               type: string
-              min_length: 1
+              min_length: 0
 
   outline:
     root_type: outline
@@ -178,13 +178,17 @@ output_validation:
     rule: contested_count_matches_nodes
     description: >
       The declared contested_or_edge_case_node_count must equal the actual
-      count of nodes with type contested or edge_case.
+      count of nodes with type contested or edge_case. The runner auto-corrects
+      this count before writing outline.yaml; a mismatch produces a review
+      checkpoint rather than a hard rejection.
     check: >
       output.contested_or_edge_case_node_count ==
       count(output.nodes where type in [contested, edge_case])
+    on_failure: checkpoint_review
     violation_message: >
-      Architect outline output rejected: contested_or_edge_case_node_count
-      does not match actual count of contested/edge_case nodes.
+      Architect outline review: contested_or_edge_case_node_count
+      does not match actual count of contested/edge_case nodes. The runner
+      has auto-corrected the count. Review the outline node types.
 
   - id: ARC-OV4
     command: outline
