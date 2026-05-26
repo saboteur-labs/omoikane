@@ -37,8 +37,15 @@ export interface HardConstraint {
   principle_ref: string;
 }
 
+export interface ContextBudget {
+  required?: string[];
+  optional?: string[];
+  forbidden?: string[];
+}
+
 export interface AgentSpec {
   role: string;
+  context_budget?: ContextBudget;
   output_schema: Record<string, CommandSchema>;
   output_validation: OVRule[];
   hard_constraints: HardConstraint[];

@@ -66,7 +66,7 @@
 **Depends on:** 1
 **Estimate:** 3
 **Notes:** Context isolation is a structural constraint enforced *here*, not in each adapter (adapter_interface.yaml §context_isolation). The constitution is `overridability: none` — it cannot be weakened by config or prompt.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
