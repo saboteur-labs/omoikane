@@ -122,7 +122,7 @@
 **Depends on:** 1
 **Estimate:** 5
 **Notes:** YAML is the source of truth. Per persistence/model.yaml, the SQLite commit (Task 7) precedes the YAML rename in the full atomic protocol — wire that ordering once Task 7 exists.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
