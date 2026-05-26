@@ -15,7 +15,8 @@ export function parseArgs(argv: string[]): ParseResult {
   switch (first) {
     case 'repo':
       if (second === 'init') return { type: 'command', command: { id: 'repo_init' } };
-      return { type: 'error', message: `Unknown repo subcommand: ${second ?? '(none)'}. Expected: init` };
+      if (second === 'reindex') return { type: 'command', command: { id: 'repo_reindex' } };
+      return { type: 'error', message: `Unknown repo subcommand: ${second ?? '(none)'}. Expected: init | reindex` };
 
     case 'status':
       return { type: 'command', command: { id: 'status' } };

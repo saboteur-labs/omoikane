@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
+import Database from 'better-sqlite3';
 import type { Manifest } from './manifest.ts';
 import { createInitialManifest, validateManifest } from './manifest.ts';
 import {
@@ -17,10 +18,10 @@ import {
   documentPath,
   gapsDir,
   gapPath,
-  promptsDir,
   omoikaneDir,
   toDateStamp,
 } from './paths.ts';
+import { openDb, createSchema, syncManifestToDb } from './index_db.ts';
 
 export class ManifestValidationError extends Error {
   constructor(public readonly violations: string[]) {
@@ -44,7 +45,17 @@ export class RepoNotInitialisedError extends Error {
 }
 
 export class StateManager {
+  private _db: Database.Database | null = null;
+
   constructor(private readonly repoDir: string) {}
+
+  private get db(): Database.Database {
+    if (!this._db) {
+      this._db = openDb(this.repoDir);
+      createSchema(this._db);
+    }
+    return this._db;
+  }
 
   /**
    * Initialises a new repo: creates directory structure and writes manifest.yaml.
@@ -73,9 +84,11 @@ export class StateManager {
   }
 
   /**
-   * Validates and atomically writes manifest.yaml via temp-then-rename.
+   * Validates and atomically writes manifest.yaml using the SQLite-first protocol:
+   *   AW-2: write YAML to temp path
+   *   AW-3: commit SQLite transaction (documents + checkpoints tables)
+   *   AW-4: rename temp YAML to final path
    * Throws ManifestValidationError if MAN-VR1 or other rules are violated.
-   * Note: SQLite transaction step is wired in Task 7 — for now, writes YAML only.
    */
   writeManifest(manifest: Manifest): void {
     manifest.last_modified = new Date().toISOString();
@@ -83,7 +96,12 @@ export class StateManager {
     const violations = validateManifest(manifest);
     if (violations.length > 0) throw new ManifestValidationError(violations);
 
-    atomicWrite(manifestPath(this.repoDir), yaml.dump(manifest, { lineWidth: 120 }));
+    atomicWriteWithDb(
+      this.db,
+      () => syncManifestToDb(this.db, manifest),
+      manifestPath(this.repoDir),
+      yaml.dump(manifest, { lineWidth: 120 }),
+    );
   }
 
   /**
@@ -125,8 +143,38 @@ export class StateManager {
 }
 
 /**
- * Writes content to a temporary path then renames to the final path.
- * The rename is atomic on POSIX — the final path is never in a partial state.
+ * SQLite-first atomic write (spec protocol AW-2 → AW-3 → AW-4):
+ *   1. Write YAML to temp path
+ *   2. Commit SQLite transaction
+ *   3. Rename temp YAML to final path
+ * On failure before commit: temp is cleaned up, no visible change.
+ * On failure after commit: SQLite is ahead of YAML; reindex corrects.
+ */
+function atomicWriteWithDb(
+  db: Database.Database,
+  sqlOps: () => void,
+  finalPath: string,
+  content: string,
+): void {
+  const tmpPath = `${finalPath}.tmp`;
+  try {
+    writeFileSync(tmpPath, content, 'utf8');
+  } catch (err) {
+    try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+    throw err;
+  }
+  try {
+    db.transaction(sqlOps)();
+    renameSync(tmpPath, finalPath);
+  } catch (err) {
+    try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+    throw err;
+  }
+}
+
+/**
+ * Simple YAML-only atomic write for document/gap files (no SQLite sync needed —
+ * those tables are populated via the manifest write or reindex).
  */
 function atomicWrite(finalPath: string, content: string): void {
   const tmpPath = `${finalPath}.tmp`;
@@ -134,7 +182,7 @@ function atomicWrite(finalPath: string, content: string): void {
     writeFileSync(tmpPath, content, 'utf8');
     renameSync(tmpPath, finalPath);
   } catch (err) {
-    try { unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
+    try { unlinkSync(tmpPath); } catch { /* best-effort */ }
     throw err;
   }
 }

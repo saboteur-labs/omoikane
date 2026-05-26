@@ -1,5 +1,6 @@
 import { parseArgs } from './parser.ts';
 import { handleRepo } from './commands/repo.ts';
+import { handleRepoReindex } from './commands/repo_reindex.ts';
 import { handleStatus } from './commands/status.ts';
 import { handleOutline } from './commands/outline.ts';
 import { handleGather } from './commands/gather.ts';
@@ -49,6 +50,8 @@ async function dispatch(command: ParsedCommand): Promise<void> {
   switch (command.id) {
     case 'repo_init':
       return handleRepo(command);
+    case 'repo_reindex':
+      return handleRepoReindex(command);
     case 'status':
       return handleStatus(command);
     case 'outline':

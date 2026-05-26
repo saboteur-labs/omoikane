@@ -1,5 +1,6 @@
 export type CommandId =
   | 'repo_init'
+  | 'repo_reindex'
   | 'status'
   | 'outline'
   | 'outline_approve'

@@ -134,7 +134,7 @@
 **Depends on:** 6
 **Estimate:** 5
 **Notes:** Index stores metadata/references, not full content. The `documents(outline_node_id, status)` index backs the fast MAN-VR1 check. `reindex` requires no network/adapter.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
