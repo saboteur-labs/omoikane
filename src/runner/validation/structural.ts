@@ -30,14 +30,10 @@ function validateObject(
   for (const [key, propSchema] of Object.entries(properties)) {
     const value = obj[key];
 
-    if (value === undefined) {
-      // Absent optional field: skip
-      if (propSchema.required === false) continue;
-      // Absent non-required field not in required_fields: skip (caught above if required)
-      continue;
-    }
+    // Absent or null optional fields are always valid — null is treated as absent.
+    if (value === undefined || (value === null && propSchema.required === false)) continue;
 
-    // null values are passed to validateValue, which enforces nullable
+    // null values on required fields are passed to validateValue, which enforces nullable
     errors.push(...validateValue(value, propSchema, `${path}.${key}`));
   }
 
