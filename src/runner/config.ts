@@ -1,6 +1,7 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import yaml from 'js-yaml';
+import { omoikaneDir } from './state/paths.ts';
 
 export interface AgentConfig {
   adapter: string;
@@ -22,6 +23,18 @@ function defaults(): OmoikaneConfig {
     agents[role] = { adapter: DEFAULT_ADAPTER, model: DEFAULT_MODEL };
   }
   return { agents };
+}
+
+export function writeDefaultConfig(repoDir: string): void {
+  const dir = omoikaneDir(repoDir);
+  const configPath = resolve(dir, 'config.yaml');
+  if (existsSync(configPath)) return;
+
+  mkdirSync(dir, { recursive: true });
+  const config = defaults();
+  const tmpPath = `${configPath}.tmp`;
+  writeFileSync(tmpPath, yaml.dump({ schema_version: '1.0', agents: config.agents }, { lineWidth: 120 }), 'utf8');
+  renameSync(tmpPath, configPath);
 }
 
 export function loadConfig(repoDir: string): OmoikaneConfig {

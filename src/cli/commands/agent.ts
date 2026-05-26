@@ -95,7 +95,7 @@ export async function handleAgent(command: ParsedCommand): Promise<void> {
 
 type AgentConfigExtended = { adapter: string; model?: string; url?: string };
 
-function buildAdapter(role: string, config: OmoikaneConfig): Adapter {
+export function buildAdapter(role: string, config: OmoikaneConfig): Adapter {
   const agentConfig = config.agents[role] as AgentConfigExtended | undefined;
   const adapterId = agentConfig?.adapter ?? 'claude';
   const model = agentConfig?.model;

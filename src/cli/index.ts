@@ -16,6 +16,7 @@ import {
   AdapterParseError,
 } from '../runner/adapters/interface.ts';
 import { SmokeTestBlockedError } from '../runner/smoke/runner.ts';
+import { RepoAlreadyInitialisedError } from '../runner/state/state_manager.ts';
 
 const HELP = `
 Omoikane — AI-augmented research and learning tool
@@ -91,6 +92,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 }
 
 function handleFatalError(err: unknown): never {
+  if (err instanceof RepoAlreadyInitialisedError) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exit(2);
+  }
   if (err instanceof SmokeTestBlockedError) {
     process.stderr.write(`Error: ${err.message}\n`);
     process.exit(4);

@@ -200,7 +200,7 @@
 **Depends on:** 7, 9, 10
 **Estimate:** 5
 **Notes:** The dialogue is interactive — the runner mediates Q&A between researcher and Architect. Default config sets all Phase 1 roles to Claude; the researcher may switch a role to custom.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 

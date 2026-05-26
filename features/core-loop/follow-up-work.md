@@ -29,3 +29,13 @@
 **Why deferred:** EC-ST3 requires detecting that uncertainty is described *specifically*, not generically. This is a semantic check that cannot be evaluated mechanically without a separate model call. The SCR-ST4/ST5 adversarial cases provide coverage for EC-ST1/EC-ST2; EC-ST3 relies on the constitution being followed.
 
 **Context:** If a future task adds a second-pass evaluator (e.g., a critic agent evaluating smoke test outputs), EC-ST3 could be wired there. For now, structural + OV rule compliance is the mechanical bound.
+
+---
+
+## 2026-05-25 — Task 11: `omoikane repo init`
+
+**Item:** Smoke tests during init cover only Phase 1 roles (architect, scribe), not all 6 configured roles
+
+**Why deferred:** Phase 2 agents (critic, auditor, cartographer, methodologist) are not invoked in Phase 1. Running their smoke tests during init would require valid mock responses for all their output schemas in tests, and would add latency to init with no functional benefit until Phase 2 is built.
+
+**Context:** `PHASE_1_ROLES = ['architect', 'scribe']` is hard-coded in `src/cli/commands/repo.ts`. When Phase 2 agents are added, update `runRepoInit` to smoke test all configured roles (or roles up to the highest active phase).
