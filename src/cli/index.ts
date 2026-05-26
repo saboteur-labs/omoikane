@@ -16,7 +16,12 @@ import {
   AdapterParseError,
 } from '../runner/adapters/interface.ts';
 import { SmokeTestBlockedError } from '../runner/smoke/runner.ts';
-import { RepoAlreadyInitialisedError } from '../runner/state/state_manager.ts';
+import { RepoAlreadyInitialisedError, RepoNotInitialisedError } from '../runner/state/state_manager.ts';
+import {
+  OutlineNotInDraftError,
+  OutlineNotApprovedError,
+  OutlineNodeNotFoundError,
+} from './commands/outline.ts';
 
 const HELP = `
 Omoikane — AI-augmented research and learning tool
@@ -92,7 +97,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 }
 
 function handleFatalError(err: unknown): never {
-  if (err instanceof RepoAlreadyInitialisedError) {
+  // All exit-2 precondition errors
+  if (
+    err instanceof RepoAlreadyInitialisedError ||
+    err instanceof RepoNotInitialisedError ||
+    err instanceof OutlineNotInDraftError ||
+    err instanceof OutlineNotApprovedError ||
+    err instanceof OutlineNodeNotFoundError
+  ) {
     process.stderr.write(`Error: ${err.message}\n`);
     process.exit(2);
   }

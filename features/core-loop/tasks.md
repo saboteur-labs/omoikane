@@ -212,7 +212,7 @@
 **Depends on:** 11
 **Estimate:** 5
 **Notes:** Workflow ordering is enforced (DP1) — gather must be impossible until an outline is approved.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
