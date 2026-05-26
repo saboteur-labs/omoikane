@@ -6,6 +6,7 @@ import {
   AdapterRateLimitError,
   AdapterParseError,
 } from './interface.ts';
+import { parseJsonResponse } from './parse.ts';
 import { loadAgentSpec } from '../validation/schema_loader.ts';
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -162,42 +163,6 @@ function extractText(response: Anthropic.Message): string {
   return '';
 }
 
-function parseJsonResponse(text: string): Record<string, unknown> {
-  const trimmed = text.trim();
-
-  // 1. Try raw JSON
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    // fall through
-  }
-
-  // 2. Strip markdown code fence
-  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch?.[1]) {
-    try {
-      return JSON.parse(fenceMatch[1].trim()) as Record<string, unknown>;
-    } catch {
-      // fall through
-    }
-  }
-
-  // 3. Extract outermost { ... } as a last resort
-  const start = trimmed.indexOf('{');
-  const end = trimmed.lastIndexOf('}');
-  if (start !== -1 && end > start) {
-    try {
-      return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
-    } catch {
-      // fall through
-    }
-  }
-
-  throw new AdapterParseError(
-    'Adapter could not parse model response into expected structure. ' +
-      'Raw response logged. Check model or prompt configuration.',
-  );
-}
 
 function isRateLimitError(err: unknown): boolean {
   return err instanceof Anthropic.RateLimitError;

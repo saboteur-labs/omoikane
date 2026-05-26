@@ -90,7 +90,7 @@
 **Depends on:** 3
 **Estimate:** 2
 **Notes:** Ollama and OpenAI adapters are explicitly out of scope (Phase 2 / not chosen). Custom proves the interface accepts an external adapter without runner changes.
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
