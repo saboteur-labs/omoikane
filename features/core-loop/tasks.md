@@ -158,7 +158,7 @@
 **Depends on:** 4, 8
 **Estimate:** 5
 **Notes:** Phase 1 non-negotiable P1-NN1 — a role is untrusted until its smoke test passes, and `low-trust` propagates (a low-trust gather can never reach `verified`). Adversarial evaluators check the spec's `pass_conditions` (e.g. tier_3 fallback on the confabulation probe).
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
