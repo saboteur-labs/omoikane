@@ -147,15 +147,16 @@ export class ClaudeAdapter implements Adapter {
     userMessage: string,
     attempt: number,
   ): Promise<AgentResponse> {
+    let rawText = '';
     try {
       const response = await this.client.messages.create({
         model: this._modelId,
-        max_tokens: 4096,
+        max_tokens: 8192,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       });
 
-      const rawText = extractText(response);
+      rawText = extractText(response);
       const parsed = parseJsonResponse(rawText);
 
       return {
@@ -168,6 +169,9 @@ export class ClaudeAdapter implements Adapter {
         },
       };
     } catch (err) {
+      if (err instanceof AdapterParseError && rawText) {
+        process.stderr.write(`[omoikane] Raw model response (parse failed):\n${rawText}\n`);
+      }
       if (isRateLimitError(err) && attempt < MAX_RETRIES) {
         const delayMs = Math.pow(2, attempt) * 1000;
         await this.sleepFn(delayMs);

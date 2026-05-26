@@ -38,6 +38,6 @@ export function parseJsonResponse(text: string): Record<string, unknown> {
 
   throw new AdapterParseError(
     'Adapter could not parse model response into expected structure. ' +
-      'Raw response logged. Check model or prompt configuration.',
+      'Raw response written to stderr. Check model or prompt configuration.',
   );
 }
