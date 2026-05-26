@@ -6,6 +6,7 @@ spec/dist/
 
 # Node / Python
 node_modules/
+dist/
 __pycache__/
 *.pyc
 .env
