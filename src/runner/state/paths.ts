@@ -43,6 +43,10 @@ export function omoikaneDir(repoDir: string): string {
   return join(repoDir, '.omoikane');
 }
 
+export function checkpointHistoryPath(repoDir: string): string {
+  return join(omoikaneDir(repoDir), 'checkpoint_history.yaml');
+}
+
 export function toDateStamp(date: Date = new Date()): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');

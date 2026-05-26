@@ -146,7 +146,7 @@
 **Depends on:** 6
 **Estimate:** 3
 **Notes:** Producers and valid actions are enumerated in `cli/checkpoints.yaml`. Phase 1 only wires Architect, Scribe, runner, and smoke-test producers — but the registry must accept the full type/action set so Phase 2 producers need no schema change (FC3).
-**Done:** [ ]
+**Done:** [x]
 
 ---
 
