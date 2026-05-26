@@ -8,6 +8,12 @@ import { handleResolve } from './commands/resolve.ts';
 import { handleClaim } from './commands/claim.ts';
 import { handleAgent } from './commands/agent.ts';
 import type { ParsedCommand } from './types.ts';
+import {
+  AdapterConnectionError,
+  AdapterTimeoutError,
+  AdapterRateLimitError,
+  AdapterParseError,
+} from '../runner/adapters/interface.ts';
 
 const HELP = `
 Omoikane — AI-augmented research and learning tool
@@ -80,4 +86,29 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   await dispatch(parsed.command);
 }
 
-main();
+function handleFatalError(err: unknown): never {
+  if (err instanceof AdapterConnectionError) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exit(5);
+  }
+  if (err instanceof AdapterTimeoutError) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exit(5);
+  }
+  if (err instanceof AdapterRateLimitError) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exit(5);
+  }
+  if (err instanceof AdapterParseError) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exit(3);
+  }
+  if (err instanceof Error) {
+    process.stderr.write(`Unexpected error: ${err.message}\n`);
+  } else {
+    process.stderr.write(`Unexpected error: ${String(err)}\n`);
+  }
+  process.exit(1);
+}
+
+main().catch(handleFatalError);
