@@ -72,6 +72,32 @@ commands:
       4: One or more smoke tests failed (roles blocked)
       5: Adapter connectivity error during smoke test
 
+  - id: repo_reset
+    namespace: repo
+    syntax: "omoikane repo reset [--yes] [--dry-run] [--keep-config]"
+    phase: 1
+    description: >
+      Restores the current repo to its starting state — the state before
+      `omoikane repo init` was ever run. Removes every generated artifact
+      (manifest.yaml, outline.yaml, learning_brief.yaml, and the documents/,
+      gaps/, prompts/, .omoikane/ directories) and leaves all repo source
+      untouched. Intended for testing and for users who want to start fresh.
+      Only the fixed set of generated paths is ever removed, so the command
+      cannot delete source even if run in the wrong directory.
+    preconditions: []
+    flags:
+      - flag: "--yes, -y"
+        description: Skip the interactive confirmation prompt (for tests / CI).
+      - flag: "--dry-run, -n"
+        description: Show what would be removed without deleting anything.
+      - flag: "--keep-config"
+        description: Preserve .omoikane/config.yaml (adapter/model choices).
+    outputs_produced:
+      - The list of removed paths, written to stdout.
+    checkpoints_produced: []
+    exit_codes:
+      0: Repo restored to starting state, already clean, or aborted by user
+
   - id: status
     namespace: root
     syntax: "omoikane status"
