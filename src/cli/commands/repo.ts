@@ -7,6 +7,7 @@ import { AdapterParseError } from '../../runner/adapters/interface.ts';
 import { loadConfig, writeDefaultConfig, KNOWN_ROLES, type OmoikaneConfig } from '../../runner/config.ts';
 import { StateManager, RepoAlreadyInitialisedError } from '../../runner/state/state_manager.ts';
 import { manifestPath, learningBriefPath } from '../../runner/state/paths.ts';
+import { planReset, executeReset, describeTarget, CONFIG_REL } from '../../runner/state/reset.ts';
 import { assembleConstitution } from '../../runner/constitution.ts';
 import { validate } from '../../runner/validation/validator.ts';
 import { createBootstrapPrompts } from '../../runner/bootstrap_prompts.ts';
@@ -140,6 +141,46 @@ export async function handleRepo(command: ParsedCommand): Promise<void> {
   }
   const repoDir = process.cwd();
   await runRepoInit(repoDir);
+}
+
+// ---------------------------------------------------------------------------
+// repo reset — restore the repo to its starting state (pre-init)
+// ---------------------------------------------------------------------------
+
+export async function handleRepoReset(command: ParsedCommand): Promise<void> {
+  const repoDir = process.cwd();
+  const { targets, keptConfig } = planReset(repoDir, { keepConfig: command.keepConfig });
+
+  if (targets.length === 0) {
+    process.stdout.write('Already at starting state — nothing to remove.\n');
+    return;
+  }
+
+  process.stdout.write(command.dryRun ? 'Would remove:\n' : 'Will remove:\n');
+  for (const rel of targets) {
+    process.stdout.write(`  - ${describeTarget(repoDir, rel)}\n`);
+  }
+  if (keptConfig) {
+    process.stdout.write(`\nKeeping: ${CONFIG_REL}\n`);
+  }
+
+  if (command.dryRun) {
+    process.stdout.write('\nDry run — nothing removed.\n');
+    return;
+  }
+
+  if (!command.yes) {
+    const answer = await defaultPromptFn(
+      '\nPermanently remove these and reset to starting state? [y/N] ',
+    );
+    if (!answer.trim().toLowerCase().startsWith('y')) {
+      process.stdout.write('Aborted. Nothing removed.\n');
+      return;
+    }
+  }
+
+  executeReset(repoDir, targets);
+  process.stdout.write('\nRepository restored to starting state.\n');
 }
 
 // ---------------------------------------------------------------------------

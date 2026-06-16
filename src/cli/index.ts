@@ -1,5 +1,5 @@
 import { parseArgs } from './parser.ts';
-import { handleRepo } from './commands/repo.ts';
+import { handleRepo, handleRepoReset } from './commands/repo.ts';
 import { handleRepoReindex } from './commands/repo_reindex.ts';
 import { handleStatus } from './commands/status.ts';
 import { handleOutline } from './commands/outline.ts';
@@ -38,6 +38,7 @@ Usage: omoikane <command> [arguments] [flags]
 
 Commands:
   repo init                                   Initialise a new knowledge repo
+  repo reset [--yes] [--dry-run] [--keep-config]   Restore repo to starting state (pre-init)
   status                                      Show repo state at a glance
   outline                                     Generate or revise the outline
   outline approve                             Approve the draft outline
@@ -67,6 +68,8 @@ async function dispatch(command: ParsedCommand): Promise<void> {
       return handleRepo(command);
     case 'repo_reindex':
       return handleRepoReindex(command);
+    case 'repo_reset':
+      return handleRepoReset(command);
     case 'status':
       return handleStatus(command);
     case 'outline':

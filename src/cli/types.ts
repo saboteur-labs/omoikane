@@ -1,6 +1,7 @@
 export type CommandId =
   | 'repo_init'
   | 'repo_reindex'
+  | 'repo_reset'
   | 'status'
   | 'outline'
   | 'outline_approve'
@@ -21,6 +22,9 @@ export interface ParsedCommand {
   action?: string;
   claimId?: string;
   role?: string;
+  yes?: boolean;
+  dryRun?: boolean;
+  keepConfig?: boolean;
 }
 
 export type ParseResult =

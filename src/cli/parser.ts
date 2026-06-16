@@ -16,7 +16,24 @@ export function parseArgs(argv: string[]): ParseResult {
     case 'repo':
       if (second === 'init') return { type: 'command', command: { id: 'repo_init' } };
       if (second === 'reindex') return { type: 'command', command: { id: 'repo_reindex' } };
-      return { type: 'error', message: `Unknown repo subcommand: ${second ?? '(none)'}. Expected: init | reindex` };
+      if (second === 'reset') {
+        const flags = [third, ...rest].filter(Boolean) as string[];
+        const known = ['--yes', '-y', '--dry-run', '-n', '--keep-config'];
+        const unknown = flags.find((f) => !known.includes(f));
+        if (unknown) {
+          return { type: 'error', message: `Unknown flag for repo reset: ${unknown}. Expected: --yes | --dry-run | --keep-config` };
+        }
+        return {
+          type: 'command',
+          command: {
+            id: 'repo_reset',
+            yes: flags.includes('--yes') || flags.includes('-y'),
+            dryRun: flags.includes('--dry-run') || flags.includes('-n'),
+            keepConfig: flags.includes('--keep-config'),
+          },
+        };
+      }
+      return { type: 'error', message: `Unknown repo subcommand: ${second ?? '(none)'}. Expected: init | reindex | reset` };
 
     case 'status':
       return { type: 'command', command: { id: 'status' } };

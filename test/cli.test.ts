@@ -41,6 +41,29 @@ describe('parseArgs', () => {
     assert.equal(result.command.id, 'repo_init');
   });
 
+  test('repo reset', () => {
+    const result = parseArgs(['repo', 'reset']);
+    assert(result.type === 'command');
+    assert.equal(result.command.id, 'repo_reset');
+    assert.equal(result.command.yes, false);
+    assert.equal(result.command.dryRun, false);
+    assert.equal(result.command.keepConfig, false);
+  });
+
+  test('repo reset with flags', () => {
+    const result = parseArgs(['repo', 'reset', '--yes', '--dry-run', '--keep-config']);
+    assert(result.type === 'command');
+    assert.equal(result.command.id, 'repo_reset');
+    assert.equal(result.command.yes, true);
+    assert.equal(result.command.dryRun, true);
+    assert.equal(result.command.keepConfig, true);
+  });
+
+  test('repo reset rejects unknown flag', () => {
+    const result = parseArgs(['repo', 'reset', '--nuke']);
+    assert.equal(result.type, 'error');
+  });
+
   test('status', () => {
     const result = parseArgs(['status']);
     assert.equal(result.type, 'command');
